@@ -74,7 +74,7 @@ const glc=document.getElementById('gl'),hud=document.getElementById('hud'),ctx=h
 const isTouch=matchMedia('(pointer:coarse)').matches||('ontouchstart' in window);
 if(isTouch)document.body.classList.add('touch');
 let VW=innerWidth,VH=innerHeight,DPR=1,GDPR=1;
-let camYaw=0,camMode=0,camSnap=true;
+let camYaw=0,camMode=0,camSnap=true,camPitch=0,manualT=-9999,mouseAtk=false;
 const touch={active:false,x:0,y:0,hb:false,run:false,atk:false};
 function inputVec(){
   if(touch.active)return {x:touch.x,y:touch.y};
@@ -132,8 +132,10 @@ const ROLES={
   '정비소':{drive:true,i:'🔧',col:'#d35400'},'부동산':{k:'realty',i:'🏠',col:'#00b894'},'증권사':{k:'bank',i:'📈',col:'#0c2461'},
   '자동차 매장':{k:'dealer',i:'🚘',col:'#b33939'},'경찰서':{k:'police',i:'👮',col:'#2b4c8c'},'병원':{k:'hospital',i:'🏥',col:'#f2f2f2'},
   '홍대 클럽':{k:'club',i:'🪩',col:'#a02d7a'},'내 집':{k:'house',i:'🛏️',col:'#55efc4'},
+  '노래방':{k:'karaoke',i:'🎤',col:'#e056fd'},'학원':{k:'academy',i:'📚',col:'#4834d4'},
+  '포장마차':{kiosk:1,i:'🏮',col:'#d63031'},'자판기':{kiosk:1,i:'🥤',col:'#0984e3'},'ATM':{kiosk:1,i:'🏧',col:'#00a8ff'},'버스정류장':{kiosk:1,i:'🚏',col:'#27ae60'},
 };
-const SIGNS=['편의점','편의점','편의점','카페','카페','치킨','김밥','분식','떡볶이','국밥','고깃집','빵집','호프','약국','은행','총포사','옷가게','미용실','헬스장','PC방','정비소','부동산'];
+const SIGNS=['편의점','편의점','편의점','카페','카페','치킨','김밥','분식','떡볶이','국밥','고깃집','빵집','호프','약국','은행','총포사','옷가게','미용실','헬스장','PC방','정비소','부동산','노래방','학원','편의점','은행'];
 const FORCE={'5,1':['편의점','총포사','치킨','정비소'],'4,1':['은행','옷가게','카페','국밥'],'6,1':['약국','헬스장','PC방','부동산'],'5,0':['분식','미용실','증권사'],'5,5':['증권사','고깃집'],'1,6':['정비소','총포사']};
 
 // ---------- 도시 생성 ----------
@@ -203,6 +205,19 @@ for(const b of allB){
   doors.push(d);b.door=d;
 }
 const HOME_DOOR=doors.find(d=>d.role==='내 집');
+// 길거리 시설: 포장마차 · 자판기 · ATM · 버스정류장 (인도 위)
+const KSIZE={'포장마차':[9,6],'자판기':[2.6,2],'ATM':[2.6,2],'버스정류장':[12,3]};
+(function(){const cand=[];
+  for(let r=0;r<=ROWS;r++){if(r===4)continue;for(let c=0;c<COLS;c++)for(const s of [-1,1])for(const f of [.3,.7]){
+    const cr=s>0?r:r-1;if(cr<0||cr>=ROWS)continue;const cell=cells[c+','+cr];if(!cell||cell.ground||SPECIAL[c+','+cr])continue;
+    const x=c*G+f*G+rnd(-20,20),y=r*G+s*(RW+11);if(doors.some(d=>Math.hypot(d.x-x,d.y-y)<40))continue;cand.push({x,y,s,c,cr})}}
+  for(let i=cand.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[cand[i],cand[j]]=[cand[j],cand[i]]}
+  const want=[['포장마차',12],['자판기',16],['ATM',9],['버스정류장',10]];let k=0;
+  for(const [role,n] of want)for(let i=0;i<n&&k<cand.length;i++,k++){const q=cand[k],[hw,hd]=KSIZE[role];
+    if(doors.some(d=>d.kiosk&&Math.hypot(d.x-q.x,d.y-q.y)<60)){i--;continue}
+    const d={x:q.x,y:q.y,nx:0,ny:-q.s,ox:q.x+hw+7,oy:q.y,role,b:null,R:ROLES[role],id:doors.length,kiosk:true,hw,hd};doors.push(d);
+    if(role!=='버스정류장')cells[q.c+','+q.cr].b.push({x:q.x-hw,y:q.y-hd,w:hw*2,h:hd*2,prop:true})}
+})();
 
 // ---------- 사람 외형 ----------
 const SKIN=['#f1c9a0','#e8b98d','#d9a479','#f5d3b3'],SHIRT=['#e74c3c','#3498db','#f1c40f','#9b59b6','#ecf0f1','#34495e','#e67e22','#1abc9c','#ff7eb6','#222','#7f8c8d','#2c3e50','#c8d6e5','#a3cb38'];
@@ -214,9 +229,9 @@ function makeLook(){const f=Math.random()<.5;return {f,shirt:pick(SHIRT),pants:p
 
 // ---------- 실내 (도시 밖 먼 곳에 방을 하나씩 만들어 둠) ----------
 const IX0=20000,IW=200,ID=150;
-const IKINDS=['store','cafe','food','bank','gun','clothes','gym','pc','realty','dealer','police','hospital','club','house'];
-const IFLOOR={store:'#e8e4da',cafe:'#a07a55',food:'#c9a27a',bank:'#d8d2c4',gun:'#4a4a4a',clothes:'#efe6ee',gym:'#3a3f47',pc:'#2b2d42',realty:'#ddd5c8',dealer:'#f0f0f0',police:'#9aa3ad',hospital:'#e9f1f5',club:'#1b1430',house:'#b98b5e'};
-const IWALL={store:'#f4f4f4',cafe:'#e9d8c4',food:'#f1e2c6',bank:'#e8e1d0',gun:'#6b5b4b',clothes:'#fbe9f1',gym:'#8f9aa6',pc:'#3d3f63',realty:'#f2efe6',dealer:'#e3e8ee',police:'#c8d2dc',hospital:'#ffffff',club:'#2d1b4e',house:'#efe3cf'};
+const IKINDS=['store','cafe','food','bank','gun','clothes','gym','pc','realty','dealer','police','hospital','club','house','karaoke','academy','jail'];
+const IFLOOR={store:'#e8e4da',cafe:'#a07a55',food:'#c9a27a',bank:'#d8d2c4',gun:'#4a4a4a',clothes:'#efe6ee',gym:'#3a3f47',pc:'#2b2d42',realty:'#ddd5c8',dealer:'#f0f0f0',police:'#9aa3ad',hospital:'#e9f1f5',club:'#1b1430',house:'#b98b5e',karaoke:'#2c1e4a',academy:'#cfc6b5',jail:'#7f8c8d'};
+const IWALL={store:'#f4f4f4',cafe:'#e9d8c4',food:'#f1e2c6',bank:'#e8e1d0',gun:'#6b5b4b',clothes:'#fbe9f1',gym:'#8f9aa6',pc:'#3d3f63',realty:'#f2efe6',dealer:'#e3e8ee',police:'#c8d2dc',hospital:'#ffffff',club:'#2d1b4e',house:'#efe3cf',karaoke:'#4a2b7a',academy:'#f5f1e6',jail:'#a4b0be'};
 const INTS={};
 IKINDS.forEach((k,i)=>{
   const x0=IX0+i*400,z0=0,R={k,i,x0,z0,x1:x0+IW,z1:z0+ID,cx:x0+IW/2,furn:[],npcs:[]};
@@ -226,7 +241,8 @@ IKINDS.forEach((k,i)=>{
   if(k==='store'){counter('#dfe6e9');for(const x of [45,155])for(const z of [78,112])F(x,z,32,5,18,'#d0d6da');F(193,70,5,40,26,'#cfe8ff',{w:3})}
   if(k==='cafe'){counter('#6d4c41');for(const x of [40,160])for(const z of [88,122])F(x,z,9,9,8,'#5d4037');F(193,60,4,30,16,'#a1887f',{decor:true})}
   if(k==='food'){counter('#795548');for(const x of [42,158])for(const z of [82,120])F(x,z,24,10,8,'#8d6e63')}
-  if(k==='bank'){counter('#455a64');F(100,20,52,1,32,'#a7d3f0',{w:3,decor:true});for(const x of [30,170])F(x,100,8,8,14,'#2e7d32',{decor:false})}
+  if(k==='bank'){counter('#455a64');F(100,20,52,1,32,'#a7d3f0',{w:3,decor:true});for(const x of [30,170])F(x,100,8,8,14,'#2e7d32',{decor:false});
+    F(198,46,2,15,28,'#8a9097',{decor:true,vault:true});R.vault={x:x0+182,y:z0+46};R.npcs.push({x:x0+190,y:z0+80,a:Math.PI,guard:true})}
   if(k==='gun'){counter('#3e3e3e');F(100,4,90,2,30,'#5d4037',{decor:true});for(const x of [40,160])F(x,92,20,6,10,'#263238')}
   if(k==='clothes'){counter('#f8bbd0');for(const x of [40,160])for(const z of [80,115])F(x,z,20,3,16,'#9e9e9e');F(196,75,2,20,30,'#cfd8dc',{w:3,decor:true})}
   if(k==='gym'){counter('#37474f');for(const x of [40,160])for(const z of [80,115])F(x,z,13,8,13,'#212121')}
@@ -238,7 +254,17 @@ IKINDS.forEach((k,i)=>{
   if(k==='club'){F(100,22,46,7,11,'#311b92');R.npcs.push({x:x0+100,y:z0+12,a:Math.PI/2});F(100,90,50,30,.4,'#000',{decor:true,dance:true});
     for(let j=0;j<7;j++)R.npcs.push({x:x0+rnd(60,140),y:z0+rnd(70,112),a:rnd(0,7),dance:true})}
   if(k==='house'){R.spot={x:x0+44,y:z0+56};F(40,28,24,16,7,'#eceff1');F(150,30,30,9,10,'#5d4037');F(150,100,10,22,9,'#455a64');F(70,110,14,10,4,'#8d6e63')}
+  if(k==='karaoke'){counter('#6c5ce7');for(const x of [45,155]){F(x,100,30,4,7,'#a29bfe');F(x,72,18,2,14,'#111',{decor:true,screen:true})}}
+  if(k==='academy'){counter('#8d6e63');F(100,6,60,1,22,'#2d5a3d',{decor:true});for(const x of [50,100,150])for(const z of [70,100])F(x,z,14,6,7,'#c8a165')}
+  if(k==='jail'){R.spot={x:x0+32,y:z0+44};R.cell={x:x0+50,y:z0+58};R.vent={x:x0+62,y:z0+12};
+    F(22,20,14,8,5,'#6d4c41');F(84,14,4,4,6,'#ecf0f1');F(62,1.6,7,1.2,7,'#636e72',{decor:true,ventd:true});
+    F(97,42,1.2,42,30,'#4b4b4b',{bars:true});F(48,85,49,1.2,30,'#4b4b4b',{bars:true});
+    F(160,112,22,10,9,'#5c6bc0');F(196,60,2,30,20,'#2d3436',{decor:true});F(140,140,30,4,26,'#636e72')}
+  const CZ={store:95,cafe:105,food:101,clothes:97,pc:95,gym:97,bank:95,hospital:95,club:0,karaoke:0,academy:0};
+  R.cust=[];if(CZ[k]){const n=k==='bank'||k==='hospital'?2:k==='store'||k==='food'||k==='cafe'?3:2,xa=k==='bank'||k==='hospital'?60:28,xb=k==='bank'||k==='hospital'?140:172;
+    for(let j=0;j<n;j++)R.cust.push({x0:x0+xa,x1:x0+xb,z:z0+CZ[k]+(j-1)*3,off:Math.random()*100,sp:.0045+Math.random()*.003,look:makeLook()})}
   for(const n of R.npcs)n.look=makeLook();
+  for(const n of R.npcs)if(n.guard)Object.assign(n.look,{shirt:'#2c3e50',pants:'#1b2631',hs:4,cap:'#1b2631',f:false,skirt:false});
   INTS[k]=R;
 });
 function intAt(x){const i=Math.floor((x-IX0+100)/400);return i>=0&&i<IKINDS.length?INTS[IKINDS[i]]:null}
@@ -280,14 +306,16 @@ function makeCar(type,x,y,dir,o={}){
     hp:100,ai:true,driver:true,police:type==='police',wait:0,ignore:0,rev:0,stuck:0};
   Object.assign(c,o);cars.push(c);return c;
 }
-function trafficType(){const r=Math.random();return r<.38?'sedan':r<.55?'suv':r<.67?'compact':r<.85?'taxi':r<.93?'bus':'sports'}
-function makePed(x,y,o={}){const p={x,y,a:rnd(0,7),look:makeLook(),down:0,flee:0,step:rnd(0,10),hp:3,angry:0,atk:0,atkCd:0,hit:0,side:1,idle:0,spd:.6};Object.assign(p,o);peds.push(p);return p}
-const MAX_PED=isTouch?50:75,MAX_TRAFFIC=isTouch?30:38;
+function trafficType(){const r=Math.random();return r<.38?'sedan':r<.55?'suv':r<.67?'compact':r<.86?'taxi':r<.9?'bus':'sports'}
+function makePed(x,y,o={}){const p={x,y,a:rnd(0,7),look:makeLook(),down:0,flee:0,step:rnd(0,10),hp:3,angry:0,atk:0,atkCd:0,hit:0,side:1,idle:0,spd:.6,umb:Math.random()<.55};Object.assign(p,o);peds.push(p);return p}
+const MAX_PED=isTouch?50:75,MAX_TRAFFIC=isTouch?20:27;
+const settings={steer:1,speed:.85,cam:1,assist:true};
 
 const player={x:5*G+RW+11,y:G+RW+11,a:0,car:null,hp:100,maxHp:100,armor:0,hunger:100,money:8000,bank:0,loan:0,walk:0,spd:0,hurt:0,
   atk:0,combo:0,comboT:0,side:1,aimT:0,cd:0,weapons:{fist:1},ammo:{taser:0,pistol:0,shotgun:0},cur:'fist',str:1,buff:0,
   look:{f:false,shirt:'#2ecc71',pants:'#2d3440',skin:'#f1c9a0',hair:'#1f1612',hs:0,shoe:'#eee',skirt:false,bag:null,cap:'#c0392b',h:1.06},
-  house:false,biz:[],stocks:{},inside:null,ownedCar:null,stats:{missions:0,earned:0}};
+  house:false,biz:[],stocks:{},inside:null,ownedCar:null,stats:{missions:0,earned:0,robs:0,steals:0},
+  xp:0,lv:1,sp:0,sk:{run:0,str:0,drive:0,gun:0,stealth:0,talk:0},nav:null};
 const pp=()=>player.car||player;
 const anchor=()=>player.inside?{x:player.inside.door.ox,y:player.inside.door.oy}:pp();
 let wanted=0,heat=0,calm=0,bust=0,shake=0,frame=0,started=false,overlay=null,menuOpen=false;
@@ -324,11 +352,11 @@ for(let i=0;i<MAX_TRAFFIC;i++){const s=roadSpot(player.x,player.y,150,1400);if(s
 for(let i=0;i<MAX_PED;i++){const s=pedSpot(player.x,player.y,60,1100);if(s)makePed(s.x,s.y)}
 
 // ---------- 신호등 ----------
-const SIG=new Map(),TL=420;
+const SIG=new Map(),TL=300;
 for(let c=0;c<=COLS;c++)for(let r=0;r<=ROWS;r++){if(r===4||!vRoad(c,r*G))continue;if((c===0||c===COLS)&&(r===0||r===ROWS))continue;SIG.set(c*100+r,(c*97+r*61)%TL)}
 // axis 0 = 동서(가로) 방향, 1 = 남북(세로) 방향
 function light(c,r,axis){const o=SIG.get(c*100+r);if(o===undefined)return 'g';const t=(frame+o)%TL;
-  if(axis===0)return t<170?'g':t<200?'y':'r';return t<210?'r':t<380?'g':t<410?'y':'r'}
+  if(axis===0)return t<120?'g':t<140?'y':'r';return t<150?'r':t<270?'g':t<290?'y':'r'}
 function signalStop(c){
   const d=c.dir,horiz=d%2===0,s=d<2?1:-1,pos=horiz?c.x:c.y,front=pos+s*c.w/2;
   const k=s>0?Math.ceil((front+RW+4)/G):Math.floor((front-RW-4)/G);
@@ -353,26 +381,30 @@ function moveCar(car,dx,dy){
   if(!carHits(car,car.x,car.y+dy,car.a))car.y+=dy;else hit=true;
   if(hit){
     const sp=Math.abs(car.v);
-    if(sp>4){car.hp-=sp*2.5;if(car===player.car){shake=sp*1.2;beep(90,.15,'square',.06)}}
-    car.v*=-.3;car.vx*=-.3;car.vy*=-.3;
+    if(sp>4){car.hp-=sp*2.5;if(car===player.car){shake=sp*1.2;beep(90,.15,'square',.06);onPlayerCrash(sp)}}
+    car.v*=-.2;car.vx*=-.2;car.vy*=-.2;
   }
   return hit;
 }
+// 운전: 부드러운 조향 · 속도별 조향 감소 · 직진 보조 (설정에서 감도/최고속 조절)
 function drivePlayer(c){
-  const I=menuOpen?{x:0,y:0}:inputVec(),up=I.y<-.25,dn=I.y>.25,hb=HB(),thr=up?Math.min(1,-I.y*1.4):0;
-  const alive=c.hp>0,tu=c.tune||1;
-  if(alive&&up)c.v+=c.v<0?.35:c.acc*tu*thr;
-  if(alive&&dn)c.v-=c.v>0?.3:.12;
-  if(!up&&!dn)c.v*=.985;
-  if(hb)c.v*=.965;
+  const I=menuOpen?{x:0,y:0}:inputVec(),up=I.y<-.25,dn=I.y>.25,hb=HB(),thr=up?Math.min(1,-I.y*1.3):0;
+  const alive=c.hp>0,tu=(c.tune||1)*(1+.04*player.sk.drive),vmax=c.max*tu*settings.speed;
+  if(alive&&up)c.v+=c.v<0?.32:c.acc*tu*thr*(1-.55*clamp(c.v/vmax,0,1));
+  if(alive&&dn)c.v-=c.v>0?.26:.1;
+  if(!up&&!dn)c.v*=.988;
+  if(hb)c.v*=.962;
   if(!alive)c.v*=.94;
-  c.v=clamp(c.v,-3.5,c.max*tu);
-  const st=clamp(I.x,-1,1)*.05*clamp(c.v/3,-1,1)*(hb?1.6:1);
-  const na=c.a+st;if(!carHits(c,c.x,c.y,na))c.a=na;
-  const tx=Math.cos(c.a)*c.v,ty=Math.sin(c.a)*c.v,grip=hb?.05:.25;
+  c.v=clamp(c.v,-3,vmax);
+  const sIn=clamp(I.x,-1,1)*(Math.abs(I.x)<.12?0:1);
+  c.steer=(c.steer||0)+(sIn-(c.steer||0))*(sIn===0?.25:.11*settings.steer);
+  const sv=Math.abs(c.v),spF=clamp(c.v/2.2,-1,1)*(1-.5*clamp((sv-4)/8,0,1));
+  const na=c.a+c.steer*.044*settings.steer*spF*(hb?1.55:1);if(!carHits(c,c.x,c.y,na))c.a=na;
+  if(settings.assist&&sIn===0&&!hb&&sv>2.5){const q=Math.round(c.a/(Math.PI/2))*(Math.PI/2);if(Math.abs(angDiff(q,c.a))<.22)c.a=lerpAng(c.a,q,.035)}
+  const tx=Math.cos(c.a)*c.v,ty=Math.sin(c.a)*c.v,grip=hb?.06:.34;
   c.vx+=(tx-c.vx)*grip;c.vy+=(ty-c.vy)*grip;
   const slip=Math.hypot(tx-c.vx,ty-c.vy);
-  if(slip>1.3&&Math.abs(c.v)>3){
+  if(slip>1.3&&sv>3){
     const cs=Math.cos(c.a),sn=Math.sin(c.a);
     for(const s of [-1,1])skids.push({x:c.x-cs*c.w*.35-sn*s*c.h*.4,y:c.y-sn*c.w*.35+cs*s*c.h*.4,life:600});
     if(frame%6===0)beep(rnd(500,700),.05,'sawtooth',.01);
@@ -381,7 +413,7 @@ function drivePlayer(c){
 }
 function walkPlayer(){
   const I=menuOpen?{x:0,y:0}:inputVec(),m=Math.min(1,Math.hypot(I.x,I.y));player.moving=false;player.spd=0;
-  if(m>.15){const base=RUN()?3.6:2.2,sp=base*m*(player.buff>0?1.3:1)*(player.hunger<=0?.75:1)*(player.atk>0?.45:1),fx=Math.cos(camYaw),fy=Math.sin(camYaw);
+  if(m>.15){const base=(RUN()?3.6:2.2)*(1+.06*player.sk.run),sp=base*m*(player.buff>0?1.3:1)*(player.hunger<=0?.75:1)*(player.atk>0?.45:1),fx=Math.cos(camYaw),fy=Math.sin(camYaw);
     let mx=fx*(-I.y)-fy*I.x,my=fy*(-I.y)+fx*I.x;const l=Math.hypot(mx,my);mx/=l;my/=l;
     if(player.aimT<=0)player.a=lerpAng(player.a,Math.atan2(my,mx),.35);player.moving=true;player.spd=sp;
     const nx=player.x+mx*sp,ny=player.y+my*sp;
@@ -390,7 +422,7 @@ function walkPlayer(){
 function aiDrive(c){
   const d=c.dir,horiz=d%2===0,look=c.w/2+22,ax=c.x+DX[d]*look,ay=c.y+DY[d]*look;
   let target=c.cruise,blocked=false;
-  if(c.wait>200){c.ignore=60;c.wait=0}
+  if(c.wait>100){c.ignore=70;c.wait=0}
   if(c.ignore>0)c.ignore--;
   else{
     for(const o of cars){if(o!==c&&Math.abs(o.x-ax)<o.w*.5+8&&Math.abs(o.y-ay)<o.w*.5+8){blocked=true;break}}
@@ -426,7 +458,7 @@ function aiDrive(c){
 }
 function damagePlayer(n){
   if(player.inside)return;
-  if(player.car){player.car.hp-=n*.8;return}
+  if(player.car){player.car.hp-=n*.8*(1-.08*player.sk.drive);return}
   const ab=Math.min(player.armor,n*.7);player.armor-=ab;player.hp-=n-ab;player.hurt=Math.max(player.hurt,16);
 }
 function policeAI(c){
@@ -461,7 +493,7 @@ function carCollisions(){
     if(rel>3&&!(a.cd>frame)&&!(b.cd>frame)){
       a.cd=b.cd=frame+25;a.hp-=rel*1.5;b.hp-=rel*1.5;
       const pc=player.car;
-      if(a===pc||b===pc){shake=rel;beep(80,.18,'square',.07);const o=a===pc?b:a;if(o.police&&o.driver&&rel>4&&!(window._rc>frame)){window._rc=frame+120;crime(1)}}
+      if(a===pc||b===pc){shake=rel;beep(80,.18,'square',.07);onPlayerCrash(rel);const o=a===pc?b:a;if(o.police&&o.driver&&rel>4&&!(window._rc>frame)){window._rc=frame+120;crime(1)}}
     }
     a.v*=.6;b.v*=.6;a.vx*=.6;a.vy*=.6;b.vx*=.6;b.vy*=.6;
   }
@@ -500,9 +532,11 @@ function hits(){
 }
 // 화난 행인: 플레이어를 쫓아와서 반격
 function angryPed(p){
-  if(player.car||player.inside||dist(p,player)>420){p.angry=0;return false}
+  if(player.car||dist(p,player)>420){p.angry=0;return false}
   p.angry--;const d=dist(p,player);p.a=Math.atan2(player.y-p.y,player.x-p.x);p.spd=0;
   if(p.atk>0)return true;
+  if(p.gun&&d>26&&d<170){if(frame%62===(p.id||0)%62){tracers.push({x1:p.x,y1:12,z1:p.y,x2:player.x+rnd(-5,5),y2:10,z2:player.y+rnd(-5,5),life:5,col:[1,.9,.5]});
+      noise(.12,1500,'lowpass',.3);if(Math.random()<.5){damagePlayer(6);player.hurt=Math.max(player.hurt,10);shake=Math.max(shake,3)}}p.aimT=10;return true}
   if(d>14){const sp=p.boss?2.3:1.9,nx=p.x+Math.cos(p.a)*sp,ny=p.y+Math.sin(p.a)*sp;if(!solid(nx,p.y))p.x=nx;if(!solid(p.x,ny))p.y=ny;p.step+=.1+sp*.05;p.spd=sp}
   else if(p.atkCd<=0){p.atk=16;p.atkCd=p.boss?40:55;p.side=-(p.side||1)}
   return true;
@@ -532,11 +566,14 @@ function updatePeds(){
 function populate(){
   const P=anchor();
   for(let i=cars.length-1;i>=0;i--){const c=cars[i];if(c===player.car||c.keep||c.owned)continue;const d=dist(c,P);
-    if((c.ai&&c.driver&&!c.police&&d>1800)||(c.police&&(wanted===0||c.hp<=0)&&d>900)||(!c.driver&&d>2600&&!c.police&&cars.length>60)||(c.boom&&d>900))cars.splice(i,1)}
+    if((c.ai&&c.driver&&!c.police&&d>1800)||(c.police&&(wanted===0||c.hp<=0)&&d>900)||(!c.driver&&d>2600&&!c.police&&cars.length>60)||(c.boom&&d>900)||(c.ai&&c.driver&&!c.keep&&c.wait>60&&d>450&&Math.random()<.15))cars.splice(i,1)}
   for(let i=peds.length-1;i>=0;i--)if(!peds[i].keep&&dist(peds[i],P)>1500)peds.splice(i,1);
   const traffic=cars.filter(c=>c.ai&&c.driver&&!c.police&&!c.keep).length;
   if(traffic<MAX_TRAFFIC){const s=roadSpot(P.x,P.y,700,1300);if(s)makeCar(trafficType(),s.x,s.y,s.dir)}
   if(peds.length<MAX_PED){const s=pedSpot(P.x,P.y,600,1100);if(s)makePed(s.x,s.y)}
+  for(const q of peds)if(q.quest&&(dist(q,P)>1600||q.down>0||q.angry)){if(!(mission&&mission.giver===q)){q.quest=null;q.keep=false;q.idle=0}}
+  if(!player.inside&&peds.filter(q=>q.quest).length<(mission?1:2)){const c=peds.filter(q=>!q.keep&&!q.boss&&q.down<=0&&!q.angry&&q.flee<=0&&dist(q,P)>120&&dist(q,P)<650&&q.x<IX0-200);
+    if(c.length){const q=pick(c);q.quest=makeQuest();q.keep=true;q.idle=1e9;q.spd=0}}
   if(wanted>0){const cops=cars.filter(c=>c.police&&c.driver&&c.hp>0).length;
     if(cops<Math.min(7,wanted*2)){const s=roadSpot(P.x,P.y,650,950);if(s){const c=makeCar('police',s.x,s.y,s.dir,{ai:false});c.a=Math.atan2(P.y-c.y,P.x-c.x)}}}
 }
@@ -544,7 +581,7 @@ function populate(){
 // =====================================================================
 // ---------- 경제: 시간 · 물가 · 은행 · 주식 · 가게 ----------
 // =====================================================================
-const econ={day:1,min:9*60,infl:1,news:[],
+const econ={day:1,min:9*60,infl:1,news:[],weather:'clear',
   stocks:[{id:'HG',n:'한강전자',p:52000,v:.035,mu:.0006},{id:'SM',n:'서울모터스',p:31000,v:.04,mu:.0004},{id:'CK',n:'치킨나라',p:8500,v:.06,mu:.0003},
     {id:'NB',n:'남산바이오',p:21000,v:.09,mu:0},{id:'BC',n:'반포건설',p:14000,v:.05,mu:.0005},{id:'KC',n:'K-코인',p:3000,v:.16,mu:-.0004}]};
 for(const s of econ.stocks){s.p0=s.p;s.hist=[s.p];s.open=s.p}
@@ -568,13 +605,13 @@ function newDay(){
 }
 function timeTick(mins=1/30){
   const h0=Math.floor(econ.min/60);econ.min+=mins;
-  if(Math.floor(econ.min/60)!==h0)stockTick();
+  if(Math.floor(econ.min/60)!==h0){stockTick();if(Math.random()<.13){const w=pick(['clear','clear','clear','cloudy','cloudy','rain','rain']);if(w!==econ.weather){econ.weather=w;toast(w==='rain'?'🌧️ 비가 오기 시작했어요':w==='cloudy'?'☁️ 하늘이 흐려졌어요':'☀️ 날씨가 맑아졌어요','#dfe6ee')}}}
   if(econ.min>=1440){econ.min-=1440;newDay()}
 }
 const hourOf=()=>econ.min/60;
 function dayK(){const h=hourOf();return clamp(Math.sin((h-6)/12*Math.PI)*2.6+.15,0,1)}
 function districtRaw(x,y){const c=clamp(Math.floor(x/G),0,COLS-1);if(y>1200&&y<2000)return '한강공원';if(Math.floor(y/G)===5&&c<=1)return '여의도';return y<1200?NORTH[c]:SOUTH[c]}
-function priceOf(base,door){const d=door||(player.inside&&player.inside.door);let m=econ.infl;if(d){m*=DPRICE[districtRaw(d.x,d.y)]||1;if(player.biz.includes(d.id))m*=.5}return Math.max(100,Math.round(base*m/100)*100)}
+function priceOf(base,door){const d=door||(player.inside&&player.inside.door);let m=econ.infl;if(d){m*=DPRICE[districtRaw(d.x,d.y)]||1;if(player.biz.includes(d.id))m*=.5}m*=1-.03*player.sk.talk;return Math.max(100,Math.round(base*m/100)*100)}
 function bizValue(d){return Math.round(60000*(DPRICE[districtRaw(d.x,d.y)]||1)*econ.infl/1000)*1000}
 function bizIncome(d){return Math.round(bizValue(d)*.045/100)*100}
 function portfolioValue(){let v=0;for(const s of econ.stocks)v+=(player.stocks[s.id]||0)*s.p;return v}
@@ -597,7 +634,8 @@ function burst(x,y,z,n){for(let i=0;i<n;i++)sparks.push({x,y,z,vx:rnd(-1.6,1.6),
 function pop(x,z,t,c){pops.push({x,y:18,z,t,c,life:42});if(pops.length>6)pops.shift()}
 function attack(){
   if(!started||overlay||menuOpen||player.car)return;
-  if(player.inside){if(!(window._iw>frame)){window._iw=frame+120;toast('실내에서는 싸울 수 없어요')}return}
+  if(player.inside&&!heist&&!peds.some(p=>p.x>IX0-200&&p.angry)){if(!(window._iw>frame)){window._iw=frame+120;toast('실내에서는 싸울 수 없어요 (강도 중 제외)')}return}
+  if(document.pointerLockElement===glc&&player.aimT<=0&&player.atk<=0)player.a=camYaw;
   if(WEAP[player.cur].melee)punch();else shoot();
 }
 function punch(){
@@ -610,16 +648,17 @@ function punch(){
 }
 function koPed(p,byGun){
   p.down=byGun?600:360;p.angry=0;p.hp=0;
-  if(!p.boss)crime(byGun?1:.35);
+  if(!p.boss)crime(byGun?1:.35);gainXP(p.boss?40:6);
   for(const q of peds)if(q!==p&&!q.angry&&q.down<=0&&dist(q,p)<(byGun?320:180)){q.flee=220;q.a=Math.atan2(q.y-p.y,q.x-p.x)}
-  if(Math.random()<.65){pickups.push({x:p.x+rnd(-6,6),y:p.y+rnd(-6,6),v:pick([100,200,300,500,1000]),life:1800});if(pickups.length>30)pickups.shift()}
+  if(p.gun)pickups.push({x:p.x+rnd(-5,5),y:p.y+rnd(-5,5),w:'pistol',am:12,life:3000});
+  if(Math.random()<.65){pickups.push({x:p.x+rnd(-6,6),y:p.y+rnd(-6,6),v:p.robbed?pick([100,200]):pick([100,200,300,500,1000]),life:1800});if(pickups.length>30)pickups.shift()}
 }
 function resolvePunch(){
   const W=WEAP[player.cur],heavy=player.combo===3,ca=Math.cos(player.a),sa=Math.sin(player.a),reach=W.range*.8,hx=player.x+ca*reach,hy=player.y+sa*reach;
   let hit=false;
   for(const p of peds){
     if(p.down>0||Math.hypot(p.x-hx,p.y-hy)>W.range)continue;
-    hit=true;p.hp-=(W.dmg+(heavy?1:0))*player.str;p.hit=12;p.flee=0;p.atk=0;p.a=player.a+Math.PI;
+    hit=true;p.hp-=(W.dmg+(heavy?1:0))*player.str*(1+.15*player.sk.str);p.hit=12;p.flee=0;p.atk=0;p.a=player.a+Math.PI;
     const kb=heavy?18:6,kx=p.x+ca*kb,ky=p.y+sa*kb;if(!solid(kx,ky)){p.x=kx;p.y=ky}
     if(p.hp<=0)koPed(p,false);
     else if(!p.angry&&(p.boss||Math.random()<.45)){p.angry=900;pop(p.x,p.y,'덤벼!','#ff9f43')}
@@ -634,10 +673,10 @@ function resolvePunch(){
 function shoot(){
   const id=player.cur,W=WEAP[id];if(player.cd>0)return;
   if(player.ammo[id]<=0){toast('탄약이 없어요 — 총포사에서 구매하세요','#ff6b6b');player.cd=40;beep(200,.05,'square',.03);return}
-  player.ammo[id]--;player.cd=W.cd;player.aimT=26;
+  player.ammo[id]--;player.cd=Math.round(W.cd*(1-.08*player.sk.gun));player.aimT=26;
   let best=null,bs=1e9;
   for(const p of peds){if(p.down>0)continue;const dx=p.x-player.x,dy=p.y-player.y,d=Math.hypot(dx,dy);if(d>W.range||d<2)continue;
-    const ad=Math.abs(angDiff(Math.atan2(dy,dx),player.a));if(ad>.65)continue;const sc=d*(1+ad*2);if(sc<bs){bs=sc;best=p}}
+    const ad=Math.abs(angDiff(Math.atan2(dy,dx),player.a));if(ad>.65+.05*player.sk.gun)continue;const sc=d*(1+ad*2);if(sc<bs){bs=sc;best=p}}
   if(!best)for(const c of cars){if(c.boom)continue;const dx=c.x-player.x,dy=c.y-player.y,d=Math.hypot(dx,dy);if(d>W.range||d<2)continue;
     const ad=Math.abs(angDiff(Math.atan2(dy,dx),player.a));if(ad>.5)continue;const sc=d*(1+ad*2);if(sc<bs){bs=sc;best=c}}
   if(best)player.a=Math.atan2(best.y-player.y,best.x-player.x);
@@ -648,7 +687,7 @@ function shoot(){
       if(solid(ex,ey)){burst(ex,11,ey,2);done=true;break}
       for(const p of peds){if(p.down>0||Math.abs(p.x-ex)>7||Math.abs(p.y-ey)>7)continue;done=true;
         if(W.stun){p.down=240;p.stun=0;p.angry=0;pop(p.x,p.y,'지지직!','#74b9ff');if(p.boss)p.hp=0}
-        else{p.hp-=W.dmg*(n>1?1.2:1.5);p.hit=10;if(p.hp<=0)koPed(p,true);else{p.flee=240;p.a=a}}
+        else{p.hp-=W.dmg*(n>1?1.2:1.5)*(1+.1*player.sk.gun);p.hit=10;if(p.hp<=0)koPed(p,true);else{p.flee=240;p.a=a}}
         burst(p.x,10,p.y,4);break}
       if(!done)for(const c of cars){if(c===player.car||Math.abs(c.x-ex)>c.w*.5||Math.abs(c.y-ey)>c.w*.5)continue;
         if(Math.hypot(c.x-ex,c.y-ey)<c.w*.45){done=true;if(!W.stun){c.hp-=W.dmg*4;if(c.police&&c.driver)crime(1)}burst(ex,8,ey,4);break}}
@@ -663,21 +702,32 @@ function shoot(){
 function combat(){
   if(player.comboT>0)player.comboT--;if(player.cd>0)player.cd--;if(player.aimT>0)player.aimT--;
   if(player.atk>0){player.atk--;if(player.atk===9&&!player.car)resolvePunch()}
-  if((touch.atk||K('KeyJ'))&&!menuOpen){if(WEAP[player.cur].melee){if(player.atk<=3)attack()}else if(player.cd<=0&&(player.cur==='pistol'||touch.atk||K('KeyJ')))attack()}
+  if((touch.atk||K('KeyJ')||mouseAtk)&&!menuOpen){if(WEAP[player.cur].melee){if(player.atk<=3)attack()}else if(player.cd<=0)attack()}
   for(let i=sparks.length-1;i>=0;i--){const s=sparks[i];s.x+=s.vx;s.y+=s.vy;s.z+=s.vz;s.vy-=.18;if(--s.life<=0||s.y<0)sparks.splice(i,1)}
   for(let i=tracers.length-1;i>=0;i--)if(--tracers[i].life<=0)tracers.splice(i,1);
   const P=pp();
   for(let i=pickups.length-1;i>=0;i--){const k=pickups[i];if(--k.life<=0){pickups.splice(i,1);continue}
-    if(!player.inside&&Math.hypot(k.x-P.x,k.y-P.y)<(player.car?26:16)){player.money+=k.v;pickups.splice(i,1);toast('+'+won(k.v),'#7CFC7C');beep(1320,.08,'triangle',.05);setTimeout(()=>beep(1760,.1,'triangle',.05),70)}}
+    if(Math.hypot(k.x-P.x,k.y-P.y)<(player.car?26:16)){pickups.splice(i,1);if(k.w){player.weapons[k.w]=1;player.ammo[k.w]+=k.am;toast(`${WEAP[k.w].i} ${WEAP[k.w].n} 탄약 +${k.am}`,'#7CFC7C');beep(700,.08,'square',.05);continue}
+      player.money+=k.v;toast('+'+won(k.v),'#7CFC7C');beep(1320,.08,'triangle',.05);setTimeout(()=>beep(1760,.1,'triangle',.05),70)}}
   for(let i=pops.length-1;i>=0;i--)if(--pops[i].life<=0)pops.splice(i,1);
 }
+// ---------- 경험치 · 레벨 · 스킬 ----------
+const xpNeed=lv=>Math.round(120*Math.pow(lv,1.45));
+const SKILLS=[['run','🏃','체력·달리기','달리기 +6% · 배고픔 감소 -8%'],['str','💪','근력','근접 공격 +15%'],['drive','🚗','운전','차 속도 +4% · 차 피해 -8%'],
+  ['gun','🎯','사격','연사 +8% · 총 피해 +10% · 조준 범위↑'],['stealth','🥷','손기술','소매치기 성공 +10% · 강도 수익 +15%'],['talk','🗣️','말빨','물건값 -3% · 미션 보상 +6% · 협박 성공↑']];
+const UNLOCK={2:'🗣️ 행인 협박하기',3:'🔫 권총 · 🚌 버스 구매',4:'🏦 은행 털기 · 🏎️ 스포츠카',5:'💥 산탄총',6:'💳 대출 한도 2배',8:'⭐ 모든 미션 보상 +20%',10:'👑 서울의 전설'};
+let lvFx=0;const xpFx=[];
+function gainXP(n,why){n=Math.round(n);if(n<=0)return;player.xp+=n;xpFx.push({t:`+${n} XP${why?' · '+why:''}`,life:100});if(xpFx.length>3)xpFx.shift();
+  while(player.xp>=xpNeed(player.lv)){player.xp-=xpNeed(player.lv);player.lv++;player.sp++;player.maxHp=Math.min(250,player.maxHp+5);player.hp=player.maxHp;lvFx=160;
+    toast(`🎉 레벨 업! Lv.${player.lv} · 스킬 포인트 +1 (📱 스킬)`,'#ffd34d');const u=UNLOCK[player.lv];if(u)setTimeout(()=>toast('🔓 해금: '+u,'#7CFC7C'),700);
+    [523,659,784,1046].forEach((f,i)=>setTimeout(()=>beep(f,.16,'triangle',.06),i*95))}}
 function crime(n){if(player.inside)return;heat=Math.min(5,heat+n);const w=Math.ceil(heat);calm=0;if(w>wanted){wanted=w;toast('수배 '+'★'.repeat(w),'#ffd34d');beep(880,.2,'square',.03)}}
 
 // ---------- 생존: 배고픔 · 체력 ----------
 function needs(){
   if(player.buff>0)player.buff--;
   if(menuOpen)return;
-  const drain=player.car?.0018:(player.spd>3?.004:.0026);
+  const drain=(player.car?.0018:(player.spd>3?.004:.0026))*(1-.08*player.sk.run);
   player.hunger=Math.max(0,player.hunger-drain);
   if(player.hunger<=0){player.hp-=.02;if(frame%1200===0)toast('🍔 배가 너무 고파요! 식당이나 편의점에 가세요','#ff9f43')}
   else if(player.hunger<20&&frame%2400===0)toast('🍔 배가 고파요','#ffb020');
@@ -685,83 +735,183 @@ function needs(){
 }
 
 // =====================================================================
-// ---------- 미션 ----------
+// ---------- 미션 (단계별 목표 · 브리핑 · 등급) ----------
 // =====================================================================
 const MT={
-  delivery:{n:'배달',i:'📦',c:'#ffd34d'},
-  taxi:{n:'택시 손님',i:'🚕',c:'#ffe066',car:1},
-  thug:{n:'불량배 혼내주기',i:'👊',c:'#ff6b6b'},
-  steal:{n:'차량 회수',i:'🔑',c:'#a29bfe'},
-  race:{n:'스트리트 레이스',i:'🏁',c:'#00d2d3',car:1},
-  collect:{n:'택배 수거',i:'📮',c:'#ff9f43'},
-  escape:{n:'경찰 따돌리기',i:'🚨',c:'#4da3ff'},
-  chase:{n:'범인 차량 검거',i:'🚓',c:'#54a0ff',car:1},
+  delivery:{n:'음식 배달',i:'🛵',c:'#ffd34d',d:'가게에서 음식을 받아 손님에게 배달해요. 차를 박거나 넘어지면 음식이 망가져서 팁이 줄어요.',steps:['가게에서 음식 받기','손님에게 배달 (음식 상태 유지)']},
+  taxi:{n:'택시 손님',i:'🚕',c:'#ffe066',car:1,d:'길가의 손님을 태워 목적지까지 모셔요. 손님 성격(급함/얌전)에 맞게 운전하면 팁을 더 받아요.',steps:['손님 옆에 차 세우기','목적지까지 운전 (손님 기분 유지)','도착해서 정차']},
+  thug:{n:'깡패 소탕',i:'👊',c:'#ff6b6b',d:'동네 상인들을 괴롭히는 깡패 두목과 부하들을 혼내주세요. 부하를 쓰러뜨리면 보너스!',steps:['깡패 구역으로 이동','두목 쓰러뜨리기 (부하는 보너스)']},
+  steal:{n:'차량 회수',i:'🔑',c:'#a29bfe',d:'사채업자에게 넘어간 의뢰인의 차를 되찾아 정비소로 가져가요. 경보기가 울리면 경찰이 쫓아와요.',steps:['표시된 차 찾아서 타기','경찰 따돌리기','정비소에 납품 (차 상태 = 보상)']},
+  race:{n:'스트리트 레이스',i:'🏁',c:'#00d2d3',car:1,d:'라이벌 2명과 체크포인트 레이스! 1등은 상금 100%, 2등은 50%, 3등은 상금이 없어요.',steps:['출발 신호 대기','체크포인트 통과','1등으로 결승']},
+  collect:{n:'택배 수거',i:'📮',c:'#ff9f43',d:'택배 트럭이 쏟은 상자들을 시간 안에 모두 주워 주세요. 빨리 끝낼수록 등급이 올라가요.',steps:['상자 모두 줍기','시간 안에 완료']},
+  escape:{n:'경찰 따돌리기',i:'🚨',c:'#4da3ff',d:'수배 3단계로 시작해요. 경찰 시야에서 벗어나 수배를 지우세요. 정비소 도색도 방법이에요.',steps:['경찰 시야에서 벗어나기','수배 0으로 만들기']},
+  chase:{n:'뺑소니 검거',i:'🚓',c:'#54a0ff',car:1,d:'뺑소니 차량을 들이받아 세운 뒤, 차에서 도망치는 범인을 직접 제압하세요.',steps:['범인 차량 추격','차를 박아서 멈추기','도망친 범인 제압']},
+  find:{n:'분실물 찾기',i:'🔎',c:'#fd79a8',npc:1,d:'의뢰인이 잃어버린 물건을 찾아서 직접 돌려주세요.',steps:['물건 찾기','의뢰인에게 돌려주기']},
+  ride:{n:'의뢰인 태워주기',i:'🧍',c:'#fdcb6e',npc:1,car:1,d:'차를 몰고 와서 의뢰인을 태운 뒤 목적지까지 데려다 주세요.',steps:['차를 타고 의뢰인 옆에 정차','목적지까지 안전 운전']},
 };
-const JOBS=[{n:'치킨 배달',i:'🍗'},{n:'떡볶이 배달',i:'🌶️'},{n:'택배 배송',i:'📦'},{n:'꽃 배달',i:'💐'},{n:'서류 배달',i:'📄'}];
+const JOBS=[{n:'후라이드 치킨',i:'🍗'},{n:'떡볶이 세트',i:'🌶️'},{n:'짜장면',i:'🍜'},{n:'피자',i:'🍕'},{n:'족발',i:'🍖'}];
+const SUR=['김','이','박','최','정','강','조','윤','장','임','한','오','서','신','권'],GM=['민준','서준','도윤','지호','현우','준서','건우','태현','성민','동현'],GF=['서연','지우','하은','민서','수아','지민','예린','유나','채원','소율'];
+function pedName(p){if(!p.name)p.name=pick(SUR)+(p.look.f?pick(GF):pick(GM));return p.name}
+const QUESTS=[
+  {type:'find',item:'👛',t:'지갑을 잃어버렸어요… 이 근처 어딘가에 떨어뜨린 것 같은데, 찾아주실래요?'},
+  {type:'find',item:'🐈',t:'우리 고양이 나비가 집을 나갔어요! 찾아주시면 꼭 사례할게요.'},
+  {type:'find',item:'📱',t:'휴대폰을 잃어버렸어요. 소중한 사진이 다 들어 있는데…'},
+  {type:'ride',t:'급하게 갈 데가 있는데 택시가 안 잡혀요. 좀 태워주실 수 있나요?'},
+  {type:'thug',t:'저 동네 깡패들이 매일 가게에 와서 돈을 뜯어가요. 혼 좀 내주세요!'},
+  {type:'delivery',t:'배달 기사님이 펑크를 냈어요! 대신 배달 좀 해 주실래요?'},
+  {type:'steal',t:'제 차를 사채업자가 가져갔어요. 정비소로 몰래 가져다 주세요!'},
+  {type:'race',t:'너 운전 좀 하냐? 우리 크루랑 한 판 붙자. 이기면 상금 줄게.'},
+  {type:'collect',t:'제 택배 트럭에서 상자가 다 쏟아졌어요… 주워 주실 수 있나요?'},
+  {type:'chase',t:'방금 저 검은 차가 사람을 치고 도망갔어요! 잡아주세요!'},
+];
+function makeQuest(){return Object.assign({mult:rnd(1.2,1.5)},pick(QUESTS))}
 let offers=[],mission=null;
 function randSpot(){return cornerSpot(Math.floor(rnd(0,COLS)),pick([0,1,2,5,6,7]))}
 function offerSpot(){const P=anchor();for(let k=0;k<40;k++){const p=randSpot(),d=Math.hypot(p.x-P.x,p.y-P.y);if(d>250&&d<1500&&!offers.some(o=>dist(o.pos,p)<250))return p}return randSpot()}
-function refreshOffers(all){if(all)offers=[];const types=Object.keys(MT);while(offers.length<3){const av=types.filter(t=>!offers.some(o=>o.type===t));offers.push({type:pick(av),pos:offerSpot()})}}
-function farSpot(min){const P=anchor();let d;for(let i=0;i<50;i++){d=randSpot();if(Math.hypot(d.x-P.x,d.y-P.y)>=min)break}return d}
+function refreshOffers(all){if(all)offers=[];const types=Object.keys(MT).filter(t=>!MT[t].npc);while(offers.length<3){const av=types.filter(t=>!offers.some(o=>o.type===t));offers.push({type:pick(av),pos:offerSpot()})}}
+function farSpot(min,max=1e9){const P=anchor();let d;for(let i=0;i<60;i++){d=randSpot();const k=Math.hypot(d.x-P.x,d.y-P.y);if(k>=min&&k<=max)break}return d}
 function nearestIX(x,y){let c=clamp(Math.round(x/G),0,COLS),r=clamp(Math.round(y/G),0,ROWS);if(r===4)r=3;return {c,r}}
-function startMission(type,mult=1){
-  const P=anchor(),m={type,t:MT[type],mult,st:'go',time:0};
-  if(type==='delivery'){m.job=pick(JOBS);m.dest=farSpot(900);const d=dist(m.dest,P);m.time=Math.round(d/2.6+700);m.reward=Math.round(d/100)*600+2500;
-    m.txt=()=>`${m.job.i} ${m.job.n} → ${districtRaw(m.dest.x,m.dest.y)}`}
-  if(type==='taxi'){m.dest=farSpot(1000);const d=dist(m.dest,P);m.time=Math.round(d/3.4+500);m.reward=Math.round(d/100)*800+3000;m.hp0=player.car?player.car.hp:100;
-    m.txt=()=>`🚕 손님을 ${districtRaw(m.dest.x,m.dest.y)}까지 · 차 조심!`;toast('🧍 손님이 탔어요','#ffe066')}
-  if(type==='thug'){const s=pedSpot(P.x,P.y,350,800)||{x:P.x+120,y:P.y};
-    m.ped=makePed(s.x,s.y,{boss:true,keep:true,hp:8,look:Object.assign(makeLook(),{f:false,shirt:'#111',pants:'#151515',hs:4,cap:'#c0392b',h:1.12,skirt:false})});
-    m.time=60*200;m.reward=7000;m.txt=()=>'👊 동네 불량배를 쓰러뜨려라'}
-  if(type==='steal'){const s=roadSpot(P.x,P.y,600,1200)||roadSpot(P.x,P.y,300,1500)||{x:P.x+200,y:P.y,dir:0};
-    m.car=makeCar('sports',s.x,s.y,s.dir,{ai:false,driver:false,keep:true,col:'#8e44ad'});m.st='get';
+const THUGLOOK=()=>Object.assign(makeLook(),{f:false,shirt:pick(['#111','#1e272e','#2d3436']),pants:'#151515',hs:pick([0,4]),cap:'#c0392b',h:1.08,skirt:false,bag:null});
+function rewardMult(){return (1+.05*(player.lv-1))*(1+.06*player.sk.talk)*(player.lv>=8?1.2:1)*econ.infl}
+function startMission(type,mult=1,opt={}){
+  const P=anchor(),m={type,t:MT[type],mult,si:0,time:0,giver:opt.giver||null,spawned:[],hp0:player.hp,crashes:0};
+  const step=t=>{m.si=Math.min(m.t.steps.length-1,m.si+1);toast('▶ '+(t||m.t.steps[m.si]),'#fff');beep(990,.08,'triangle',.05)};m.step=step;
+  if(type==='delivery'){
+    const foods=doors.filter(d=>d.R.k==='food'&&!d.kiosk).map(d=>({d,k:Math.hypot(d.ox-P.x,d.oy-P.y)})).filter(o=>o.k>120).sort((a,b)=>a.k-b.k);
+    m.shop=(foods[Math.min(foods.length-1,Math.floor(rnd(0,4)))]||{d:doors[0]}).d;m.job=pick(JOBS);m.cond=100;m.st='pick';m.time=60*150;m.reward=4000;
+    m.txt=()=>m.st==='pick'?`${m.job.i} ${m.shop.role}에서 ${m.job.n} 받기`:`${m.job.i} ${districtRaw(m.dest.x,m.dest.y)} ${pedName(m.cust)}님께 배달 · 음식 상태 ${Math.round(m.cond)}%`;
+    m.score=()=>m.cond/100*.6+m.time/m.max*.4}
+  if(type==='taxi'||type==='ride'){
+    m.mood=100;m.pers=pick(['hurry','calm','talk']);m.st='pick';
+    if(type==='ride'){m.pass=m.giver}else{const s=pedSpot(P.x,P.y,150,450)||{x:P.x+60,y:P.y+40};m.pass=makePed(s.x,s.y,{keep:true,idle:1e9});m.spawned.push(m.pass)}
+    m.time=60*120;m.reward=3500;
+    const PN={hurry:'⏱️ 급한 손님',calm:'🧘 얌전한 손님',talk:'💬 수다쟁이 손님'};
+    m.txt=()=>m.st==='pick'?`🧍 ${pedName(m.pass)}님 옆에 차 세우기 (${PN[m.pers]})`:`🏁 ${districtRaw(m.dest.x,m.dest.y)}까지 · 기분 ${Math.round(m.mood)}%${m.pers==='hurry'?' · 빨리!':m.pers==='calm'?' · 살살!':''}`;
+    m.score=()=>m.mood/100*.7+m.time/m.max*.3}
+  if(type==='thug'){const s=pedSpot(P.x,P.y,350,800)||{x:P.x+120,y:P.y};m.area={x:s.x,y:s.y};m.st='go';
+    m.ped=makePed(s.x,s.y,{boss:true,keep:true,hp:9,look:Object.assign(THUGLOOK(),{shirt:'#7b1fa2',h:1.15})});m.spawned.push(m.ped);m.minions=[];
+    for(let i=0;i<2;i++){const q=makePed(s.x+rnd(-25,25),s.y+rnd(-25,25),{boss:true,keep:true,hp:4,look:THUGLOOK()});m.minions.push(q);m.spawned.push(q)}
+    m.time=60*200;m.reward=8000;m.txt=()=>m.st==='go'?`👊 ${districtRaw(m.area.x,m.area.y)} 깡패 구역으로`:`👊 두목 쓰러뜨리기 · 부하 ${m.minions.filter(q=>q.down>0).length}/2`;
+    m.score=()=>clamp(player.hp/Math.max(1,m.hp0),0,1)*.5+m.minions.filter(q=>q.down>0).length*.25}
+  if(type==='steal'){const s=roadSpot(P.x,P.y,500,1100)||roadSpot(P.x,P.y,300,1500)||{x:P.x+200,y:P.y,dir:0};
+    m.car=makeCar(pick(['sports','suv','sedan']),s.x,s.y,s.dir,{ai:false,driver:false,keep:true,col:'#8e44ad'});m.st='get';
     const gs=doors.filter(d=>d.R.drive);m.garage=gs.sort((a,b)=>Math.hypot(b.ox-s.x,b.oy-s.y)-Math.hypot(a.ox-s.x,a.oy-s.y))[Math.min(1,gs.length-1)]||gs[0];
-    m.time=60*240;m.reward=12000;m.txt=()=>m.st==='get'?'🔑 보라색 스포츠카를 찾아 타라':'🔧 정비소로 몰고 가라'}
-  if(type==='race'){let {c,r}=nearestIX(P.x,P.y),dir=-1;m.cps=[];let len=0,px=P.x,py=P.y;
+    m.time=60*240;m.reward=12000;
+    m.txt=()=>m.st==='get'?'🔑 보라색 차를 찾아서 타기':wanted>0?`🚨 경찰 따돌리기 (수배 ${wanted})`:`🔧 ${districtRaw(m.garage.x,m.garage.y)} 정비소로 · 차 상태 ${Math.max(0,Math.round(m.car.hp))}%`;
+    m.score=()=>Math.max(0,m.car.hp)/100*.7+m.time/m.max*.3}
+  if(type==='race'){let {c,r}=nearestIX(P.x,P.y),dir=-1;m.cps=[];let len=0,px=c*G,py=r*G;m.start={x:px,y:py};
     for(let i=0;i<6;i++){const opts=[0,1,2,3].filter(d=>{if(d===(dir+2)%4)return false;const nc=c+DX[d]*2,nr=r+DY[d]*2;if(nc<0||nc>COLS||nr<0||nr>ROWS||nr===4||(r<=3&&nr>=5)||(r>=5&&nr<=3&&!BRIDGES[c]))return false;
         if(d%2===1){for(let k=1;k<=2;k++)if(r+DY[d]*k===4||!vRoad(c,(r+DY[d]*(k-.5))*G))return false}return true});
       if(!opts.length)break;dir=pick(opts);c+=DX[dir]*2;r+=DY[dir]*2;const cp={x:c*G,y:r*G};len+=Math.hypot(cp.x-px,cp.y-py);px=cp.x;py=cp.y;m.cps.push(cp)}
-    m.ci=0;m.time=Math.round(len/5.6+240);m.reward=9000;m.txt=()=>`🏁 체크포인트 ${m.ci+1}/${m.cps.length}`}
-  if(type==='collect'){m.items=[];for(let i=0;i<5;i++){const s=pedSpot(P.x,P.y,150,750);if(s)m.items.push({x:s.x,y:s.y,got:false})}
-    m.time=60*160;m.reward=7000;m.txt=()=>`📮 택배 ${m.items.filter(q=>q.got).length}/${m.items.length} 수거`}
-  if(type==='escape'){heat=Math.max(heat,2);wanted=Math.max(wanted,2);calm=0;m.reward=8000;m.time=0;m.txt=()=>'🚨 경찰을 따돌려라 (수배 해제)'}
-  if(type==='chase'){const s=roadSpot(P.x,P.y,450,900)||roadSpot(P.x,P.y,300,1300)||{x:P.x+300,y:P.y,dir:0};
-    m.car=makeCar('sedan',s.x,s.y,s.dir,{keep:true,flee:true,cruise:7.5,max:10,col:'#111'});m.time=60*180;m.reward=12000;m.txt=()=>`🚓 범인 차량을 박아서 멈춰라 (${Math.max(0,Math.round(m.car.hp))}%)`}
-  m.reward=Math.round(m.reward*mult*econ.infl/100)*100;m.max=m.time;mission=m;
+    m.ci=0;m.cd=200;m.st='count';m.path=[m.start].concat(m.cps);m.len=len;m.time=Math.round(len/4.6+600);m.reward=11000;m.rivals=[];
+    const a0=Math.atan2(m.cps[0].y-m.start.y,m.cps[0].x-m.start.x);
+    ['#f1c40f','#00cec9'].forEach((col,i)=>{const ox=-Math.sin(a0)*(i?18:-18)-Math.cos(a0)*30,oy=Math.cos(a0)*(i?18:-18)-Math.sin(a0)*30;
+      const rc=makeCar('sports',m.start.x+ox,m.start.y+oy,0,{ai:false,driver:true,keep:true,racer:true,col,seg:0,t:0,base:rnd(6.3,7.3),lat:i?9:-9});rc.a=a0;m.rivals.push(rc)});
+    m.txt=()=>m.st==='count'?'🏁 출발 신호를 기다려요…':`🏁 체크포인트 ${m.ci+1}/${m.cps.length} · 현재 ${raceRank()}등`;
+    m.score=()=>raceRank()===1?.6+m.time/m.max*.4:.3}
+  if(type==='collect'){m.items=[];const n=6;for(let i=0;i<n;i++){const s=pedSpot(P.x,P.y,150,750);if(s)m.items.push({x:s.x,y:s.y,got:false})}
+    m.time=60*170;m.reward=7000;m.txt=()=>`📮 택배 ${m.items.filter(q=>q.got).length}/${m.items.length} 수거`;m.score=()=>m.time/m.max}
+  if(type==='escape'){heat=Math.max(heat,3);wanted=Math.max(wanted,3);calm=0;m.reward=9000;m.time=60*240;m.txt=()=>`🚨 경찰 따돌리기 · 수배 ${'★'.repeat(wanted)}`;m.score=()=>m.time/m.max}
+  if(type==='chase'){const s=roadSpot(P.x,P.y,450,900)||roadSpot(P.x,P.y,300,1300)||{x:P.x+300,y:P.y,dir:0};m.st='chase';
+    m.car=makeCar('sedan',s.x,s.y,s.dir,{keep:true,flee:true,cruise:7,max:10,col:'#111',hp:80});m.time=60*200;m.reward=13000;
+    m.txt=()=>m.st==='chase'?`🚓 뺑소니 차량을 박아서 세워라 (차 ${Math.max(0,Math.round(m.car.hp))}%)`:'🏃 도망치는 범인을 제압하라!';m.score=()=>m.time/m.max}
+  if(type==='find'){const s=pedSpot(P.x,P.y,250,650)||{x:P.x+150,y:P.y};m.item={x:s.x,y:s.y,i:opt.item||'👛'};m.st='find';m.time=60*200;m.reward=6000;
+    m.txt=()=>m.st==='find'?`${m.item.i} 잃어버린 물건 찾기 (근처 수색)`:`${m.item.i} ${pedName(m.giver)}님에게 돌려주기`;m.score=()=>m.time/m.max}
+  if(type==='ride'){m.dest=null}
+  m.reward=Math.round(m.reward*mult*rewardMult()/100)*100;m.max=m.time;mission=m;
+  if(m.giver){m.giver.quest=null;m.giver.keep=true}
   toast(`${m.t.i} ${m.t.n} 시작! 보상 ${won(m.reward)}`,'#ffd34d');beep(660,.15,'triangle',.05);
 }
+function raceRank(){const m=mission;if(!m||m.type!=='race')return 1;const cp=m.cps[m.ci],prev=m.path[m.ci],seg=Math.max(1,dist(prev,cp||prev));
+  const me=m.ci+(cp?clamp(1-dist(pp(),cp)/seg,0,1):0);let r=1;for(const c of m.rivals)if(c.seg+c.t>me)r++;return r}
+function racerMove(c){const m=mission;if(!m||m.type!=='race'){c.v*=.9;return}
+  if(m.st==='count'||c.seg>=m.path.length-1){c.v=0;return}
+  const A=m.path[c.seg],B=m.path[c.seg+1],L=Math.max(1,dist(A,B)),me=m.ci,ahead=c.seg+c.t>me+.4;
+  const nearEnd=(1-c.t)*L<70||c.t*L<40;c.v+=((c.base*(ahead?.9:1.12)*(nearEnd?.6:1))-c.v)*.05;
+  c.t+=c.v/L;if(c.t>=1){c.seg++;c.t=0;if(c.seg>=m.path.length-1){c.finished=frame;return}}
+  const a=Math.atan2(B.y-A.y,B.x-A.x);c.a=lerpAng(c.a,a,.25);
+  const nx=-Math.sin(a)*c.lat,ny=Math.cos(a)*c.lat;c.x=A.x+(B.x-A.x)*c.t+nx;c.y=A.y+(B.y-A.y)*c.t+ny}
 function missionTarget(){
-  const m=mission;if(!m){if(player.inside)return null;const P=anchor();let b=null,bd=1e9;for(const o of offers){const d=dist(o.pos,P);if(d<bd){bd=d;b=o.pos}}return b}
-  if(m.type==='delivery'||m.type==='taxi')return m.dest;
+  const m=mission,P=anchor();
+  if(!m){if(player.inside)return null;if(player.nav)return player.nav;let b=null,bd=1e9;for(const o of offers){const d=dist(o.pos,P);if(d<bd){bd=d;b=o.pos}}return b}
+  if(m.type==='delivery')return m.st==='pick'?{x:m.shop.ox,y:m.shop.oy}:m.cust;
+  if(m.type==='taxi'||m.type==='ride')return m.st==='pick'?m.pass:m.dest;
   if(m.type==='thug')return m.ped;
   if(m.type==='steal')return m.st==='get'?m.car:{x:m.garage.ox,y:m.garage.oy};
   if(m.type==='race')return m.cps[m.ci];
-  if(m.type==='collect'){const P=anchor();let b=null,bd=1e9;for(const q of m.items)if(!q.got){const d=dist(q,P);if(d<bd){bd=d;b=q}}return b}
-  if(m.type==='chase')return m.car;
+  if(m.type==='collect'){let b=null,bd=1e9;for(const q of m.items)if(!q.got){const d=dist(q,P);if(d<bd){bd=d;b=q}}return b}
+  if(m.type==='chase')return m.st==='chase'?m.car:m.crook;
+  if(m.type==='find')return m.st==='find'?m.item:m.giver;
   return null;
 }
-function endMission(){const m=mission;if(!m)return;if(m.ped)m.ped.keep=false;if(m.car){m.car.keep=false;m.car.flee=false;m.car.cruise=rnd(3.5,4.5)}mission=null}
-function completeMission(bonus=0){const m=mission,tot=m.reward+bonus;player.money+=tot;player.stats.missions++;player.stats.earned+=tot;
-  toast(`✅ ${m.t.n} 완료! +${won(tot)}${bonus?' (보너스)':''}`,'#7CFC7C');beep(880,.12,'triangle',.05);setTimeout(()=>beep(1175,.2,'triangle',.05),120);
+function endMission(){const m=mission;if(!m)return;
+  for(const q of m.spawned){q.keep=false;q.idle=0;if(q.boss&&q.down<=0){q.boss=false;q.angry=0;q.flee=200}}
+  if(m.giver){m.giver.keep=false;m.giver.idle=0;m.giver.quest=null}
+  if(m.car){m.car.keep=false;m.car.flee=false;m.car.cruise=rnd(3.5,4.5)}
+  if(m.rivals)for(const c of m.rivals){const i=cars.indexOf(c);if(i>=0)cars.splice(i,1)}
+  mission=null}
+let resultCard=null;
+function completeMission(extra=0,note=''){const m=mission;const sc=clamp(m.score?m.score():.6,0,1),grade=sc>=.85?'S':sc>=.65?'A':sc>=.4?'B':'C',gm={S:1.5,A:1.25,B:1.1,C:1}[grade];
+  const base=m.reward,bonus=Math.round(base*(gm-1)/100)*100+extra,tot=base+bonus;player.money+=tot;player.stats.missions++;player.stats.earned+=tot;
+  const xp=Math.round((50+base/120)*(m.giver?1.3:1)*(grade==='S'?1.3:1));gainXP(xp,'미션');
+  resultCard={t:`${m.t.i} ${m.t.n} 완료!`,grade,lines:[`기본 보상 ${won(base)}`,bonus?`등급·보너스 +${won(bonus)}${note?' ('+note+')':''}`:note,`경험치 +${xp} XP`].filter(Boolean),life:330};
+  if(m.giver)pop(m.giver.x,m.giver.y,'고마워요!','#7CFC7C');
+  beep(880,.12,'triangle',.05);setTimeout(()=>beep(1175,.2,'triangle',.05),120);setTimeout(()=>beep(1568,.25,'triangle',.05),260);
   endMission();save()}
 function failMission(t){if(!mission)return;toast('❌ '+t,'#ff6b6b');beep(220,.3,'sawtooth',.03);endMission()}
+function onPlayerCrash(sp){const m=mission;if(!m||sp<3)return;m.crashes++;
+  if(m.type==='delivery'&&m.st==='go'){m.cond=Math.max(0,m.cond-sp*2.2);if(m.cond<=0)failMission('음식이 다 쏟아졌어요…');else if(sp>5)pop(pp().x,pp().y,'음식이…!','#ff9f43')}
+  if((m.type==='taxi'||m.type==='ride')&&m.st==='go'){m.mood=Math.max(0,m.mood-sp*(m.pers==='calm'?3:1.6));pop(pp().x,pp().y,pick(['으악!','조심해요!','아이고!']),'#ff9f43')}}
+const TALK=['요즘 강남 집값 너무 올랐죠?','기사님 운전 잘하시네요!','오늘 주식 좀 오를까요?','저 어제 한강에서 라면 먹었어요.','이 동네 떡볶이 맛집 알아요?','비 오는 날엔 파전인데…'];
 function missionLogic(){
   const P=anchor();
-  if(!mission&&!player.inside){for(const o of offers){if(dist(o.pos,P)>36)continue;
-      if(MT[o.type].car&&!player.car){if(!(o.warn>frame)){o.warn=frame+300;toast('🚗 차가 필요한 미션이에요','#ffd34d')}continue}
-      offers.splice(offers.indexOf(o),1);startMission(o.type);refreshOffers();break}}
+  if(player.nav&&dist(P,player.nav)<35){toast('📍 도착했어요','#7CFC7C');player.nav=null}
+  if(!mission&&!player.inside&&!menuOpen){for(const o of offers){if(dist(o.pos,P)>36||o.cool>frame)continue;o.cool=frame+400;openBrief(o.type,{offer:o});break}}
   const m=mission;if(!m)return;
-  if(m.time>0&&--m.time<=0)return failMission('시간 초과…');
-  if(m.type==='delivery'&&dist(P,m.dest)<40)completeMission(Math.round(m.time/m.max*m.reward*.5/100)*100);
-  if(m.type==='taxi'){if(!player.car)return failMission('손님이 내려버렸어요');if(player.car.hp<m.hp0-35)return failMission('손님이 겁먹고 내렸어요');
-    if(dist(P,m.dest)<45)completeMission(Math.round(m.time/m.max*m.reward*.4/100)*100)}
-  if(m.type==='thug'&&m.ped.down>0)completeMission();
-  if(m.type==='steal'){if(m.car.hp<=0)return failMission('차가 망가졌어요');if(m.st==='get'&&player.car===m.car){m.st='go2';toast('🔧 정비소로 가져가세요','#a29bfe')}
-    if(m.st==='go2'&&player.car===m.car&&Math.hypot(P.x-m.garage.ox,P.y-m.garage.oy)<50)completeMission()}
-  if(m.type==='race'){const cp=m.cps[m.ci];if(cp&&dist(P,cp)<48){m.ci++;beep(990,.08,'triangle',.05);if(m.ci>=m.cps.length)completeMission(Math.round(m.time*8/100)*100)}}
-  if(m.type==='collect'){for(const q of m.items)if(!q.got&&dist(q,P)<(player.car?26:18)){q.got=true;beep(1200,.08,'triangle',.05)}if(m.items.every(q=>q.got))completeMission()}
-  if(m.type==='escape'&&wanted===0)completeMission();
-  if(m.type==='chase'){if(m.car.hp<=0)completeMission();else if(dist(m.car,P)>2300)failMission('범인을 놓쳤어요')}
+  if(m.time>0&&!menuOpen&&--m.time<=0)return failMission('시간 초과…');
+  const car=player.car,spd=car?Math.abs(car.v):0;
+  if(m.type==='delivery'){
+    if(m.st==='pick'&&dist(P,{x:m.shop.ox,y:m.shop.oy})<34){m.st='go';m.dest=farSpot(700,1700);m.cust=makePed(m.dest.x,m.dest.y,{keep:true,idle:1e9});m.spawned.push(m.cust);
+      const d=dist(m.dest,P);m.time=Math.round(d/2.4+900);m.max=m.time;m.step(`${m.job.i} 음식 받음! ${pedName(m.cust)}님께 배달 (${(d*2.5/1000).toFixed(1)}km)`)}
+    if(m.st==='go'){if(m.cust.down>0)return failMission('손님이 쓰러졌어요…');if(dist(P,m.cust)<30)completeMission(Math.round(m.reward*.3*m.cond/100/100)*100,'팁')}}
+  if(m.type==='taxi'||m.type==='ride'){
+    if(m.st==='pick'){if(m.pass.down>0)return failMission('손님이 다쳤어요…');
+      if(car&&dist(car,m.pass)<45&&spd<1.3){m.st='go';const i=peds.indexOf(m.pass);if(i>=0)peds.splice(i,1);m.dest=farSpot(900,1900);const d=dist(m.dest,P);
+        m.time=Math.round(d/(m.pers==='hurry'?4.6:3.4)+600);m.max=m.time;m.step(`🧍 ${pedName(m.pass)}: "${m.pers==='hurry'?'빨리 좀 가주세요! 늦었어요!':m.pers==='calm'?'천천히, 안전하게 부탁해요.':pick(TALK)}"`)}}
+    else{if(!car)return failMission('손님이 내려버렸어요');
+      if(m.pers==='calm'&&spd>7.5)m.mood-=.12;if(m.pers==='hurry'&&spd<3&&frame%2)m.mood-=.06;if(m.pers==='talk'&&frame%900===0)pop(car.x,car.y,pick(TALK),'#fff');
+      if(m.mood<=0)return failMission('손님이 화나서 내렸어요');
+      if(dist(P,m.dest)<48&&spd<1.5){const tip=Math.round(m.reward*.5*m.mood/100/100)*100;completeMission(tip,'팁')}}}
+  if(m.type==='thug'){if(m.st==='go'&&dist(P,m.area)<160){m.st='fight';m.step('👊 깡패들이 덤벼든다! 두목을 쓰러뜨려라')}
+    if(m.ped.down>0){const k=m.minions.filter(q=>q.down>0).length;completeMission(k*1500,k?`부하 ${k}명`:'')}}
+  if(m.type==='steal'){if(m.car.hp<=0)return failMission('차가 망가졌어요');
+    if(m.st==='get'&&player.car===m.car){m.st='go';if(player.sk.stealth>=3){m.step('🥷 경보기를 조용히 껐다! 정비소로')}else{wanted=Math.max(wanted,1);heat=Math.max(heat,1.5);calm=0;m.step('🚨 경보기가 울렸다! 경찰을 따돌리고 정비소로');noise(.6,2400,'bandpass',.2)}}
+    if(m.st==='go'&&player.car===m.car&&Math.hypot(P.x-m.garage.ox,P.y-m.garage.oy)<50){if(wanted>0){if(!(m.warn>frame)){m.warn=frame+240;toast('👮 경찰이 따라오고 있어요! 먼저 따돌리세요','#ff6b6b')}}
+      else completeMission(Math.round(m.reward*.4*Math.max(0,m.car.hp)/100/100)*100,'차 상태 보너스')}}
+  if(m.type==='race'){
+    if(m.st==='count'){m.cd--;if(m.cd%60===0&&m.cd>0){toast(`🏁 ${m.cd/60}…`,'#ffd34d');beep(660,.15,'square',.05)}if(m.cd<=0){m.st='go';m.si=1;toast('🏁 GO!!!','#7CFC7C');beep(1320,.3,'square',.06)}}
+    const cp=m.cps[m.ci];if(m.st==='go'&&cp&&dist(P,cp)<50){m.ci++;beep(990,.08,'triangle',.05);gainXP(4);
+      if(m.ci>=m.cps.length){const r=1+m.rivals.filter(c=>c.finished).length;if(r===1)completeMission(Math.round(m.time*6/100)*100,'1등!');
+        else if(r===2){m.reward=Math.round(m.reward*.5/100)*100;completeMission(0,'2등')}else failMission('3등… 상금은 없어요')}}
+    if(m.st==='go'&&!car&&!(m.warn>frame)){m.warn=frame+300;toast('🚗 차를 타고 달려야 해요!','#ff6b6b')}}
+  if(m.type==='collect'){for(const q of m.items)if(!q.got&&dist(q,P)<(car?26:18)){q.got=true;beep(1200,.08,'triangle',.05);gainXP(3)}if(m.items.every(q=>q.got))completeMission()}
+  if(m.type==='escape'){if(m.si===0&&calm>60)m.step('🚨 시야에서 벗어났다! 계속 숨어 있어라');if(wanted===0)completeMission()}
+  if(m.type==='chase'){
+    if(m.st==='chase'){if(m.car.hp<=0){m.st='crook';m.car.flee=false;const s={x:m.car.x+Math.cos(m.car.a+Math.PI/2)*22,y:m.car.y+Math.sin(m.car.a+Math.PI/2)*22};
+        m.crook=makePed(s.x,s.y,{boss:true,keep:true,hp:5,flee:400,look:THUGLOOK()});m.crook.a=Math.atan2(s.y-P.y,s.x-P.x);m.spawned.push(m.crook);m.si=2;toast('🏃 범인이 차에서 내려 도망친다! 제압하라','#ffd34d')}
+      else if(dist(m.car,P)>2300)return failMission('범인을 놓쳤어요')}
+    else if(m.crook.down>0)completeMission(2000,'범인 체포');else if(dist(m.crook,P)>1200)failMission('범인이 도망쳤어요')}
+  if(m.type==='find'){if(m.giver.down>0)return failMission('의뢰인이 쓰러졌어요…');
+    if(m.st==='find'&&dist(P,m.item)<(car?26:16)){m.st='back';m.step(`${m.item.i} 찾았다! ${pedName(m.giver)}님에게 돌려주자`);beep(1200,.1,'triangle',.05)}
+    if(m.st==='back'&&dist(P,m.giver)<24)completeMission()}
+}
+// 미션 브리핑 패널 열기
+function openBrief(type,src){if(mission)return;panelState={type:'brief',mt:type,src};menuOpen=true;exitLock&&exitLock();renderPanel()}
+function acceptBrief(){const s=panelState;if(!s||s.type!=='brief')return;const t=s.mt,T=MT[t];
+  if(t==='race'&&!player.car){toast('🚗 차를 타고 와야 레이스에 참가할 수 있어요','#ff6b6b');return}
+  closePanel();
+  if(s.src.offer){const i=offers.indexOf(s.src.offer);if(i>=0)offers.splice(i,1);startMission(t);refreshOffers()}
+  else if(s.src.giver){const g=s.src.giver;startMission(t,g.quest?g.quest.mult:1.3,{giver:g,item:g.quest&&g.quest.item});}
 }
 
 // =====================================================================
@@ -792,26 +942,84 @@ function toggleCar(){
     player.car=best;beep(220,.08,'triangle',.05);
   }
 }
+function nearPed(){if(player.car||player.inside)return null;let b=null,bd=18;
+  for(const p of peds){if(p.down>0||p.angry||Math.abs(p.x-player.x)>20||Math.abs(p.y-player.y)>20)continue;const d=dist(p,player);if(d<bd){bd=d;b=p}}return b}
 function nearDoor(){if(player.car||player.inside)return null;let best=null,bd=20;
   for(const d of doors){if(d.R.drive||Math.abs(d.ox-player.x)>30||Math.abs(d.oy-player.y)>30)continue;const dd=Math.hypot(d.ox-player.x,d.oy-player.y);if(dd<bd){bd=dd;best=d}}return best}
 function nearGarage(){const c=player.car;if(!c)return null;for(const d of doors)if(d.R.drive&&Math.hypot(d.ox+d.nx*22-c.x,d.oy+d.ny*22-c.y)<48)return d;return null}
 function enterBuilding(d){
   if(d.role==='내 집'&&!player.house){toast('🏠 부동산에서 집을 먼저 사세요','#ffd34d');return}
+  if(d.role==='경찰서'&&wanted>0){toast('👮 수배 중엔 경찰서에 들어가면 바로 체포돼요!','#ff6b6b');return}
   if(d.role==='홍대 클럽'){const fee=priceOf(5000,d);if(player.money<fee){toast('입장료 '+won(fee)+'가 필요해요','#ff6b6b');return}player.money-=fee;toast('🪩 입장료 -'+won(fee),'#ff7eb6')}
   const R=INTS[d.R.k];player.inside={door:d,R};player.x=R.cx;player.y=R.z1-26;player.a=-Math.PI/2;camYaw=-Math.PI/2;camSnap=true;
   beep(660,.06,'triangle',.04);setTimeout(()=>beep(880,.08,'triangle',.04),80);document.body.classList.add('inside');
 }
-function exitBuilding(){const d=player.inside.door;player.inside=null;player.x=d.ox+d.nx*3;player.y=d.oy+d.ny*3;player.a=Math.atan2(d.ny,d.nx);camYaw=player.a;camSnap=true;document.body.classList.remove('inside');beep(520,.06,'triangle',.04)}
+function exitBuilding(){if(player.jail)return;const d=player.inside.door;
+  for(let i=peds.length-1;i>=0;i--)if(peds[i].x>IX0-200)peds.splice(i,1);
+  if(heist){if(heist.done){wanted=Math.max(wanted,4);heat=4;calm=0;toast('🚨 경찰이 은행을 포위했다! 도망쳐!','#ff6b6b')}else toast('은행 털기 포기…','#ff6b6b');heist=null}
+  player.inside=null;player.x=d.ox+d.nx*3;player.y=d.oy+d.ny*3;player.a=Math.atan2(d.ny,d.nx);camYaw=player.a;camSnap=true;document.body.classList.remove('inside');beep(520,.06,'triangle',.04)}
 function ctxAction(){
   if(menuOpen)return null;
-  if(player.inside){const R=player.inside.R;if(dist(player,R.spot)<18)return {i:player.inside.door.R.i,t:R.k==='house'?'잠자기<br>메뉴':'이용<br>하기',f:()=>openShop(player.inside.door)};
+  if(player.inside){const R=player.inside.R;
+    if(player.jail){if(dist(player,R.spot)<18)return {i:'🛏️',t:'감옥<br>메뉴',f:openJail};if(R.vent&&dist(player,R.vent)<16)return {i:'🔧',t:'환풍구<br>뜯기',f:()=>toast('🔧 그 자리에 서 있으면 환풍구를 뜯어요. 간수가 안 볼 때!','#ffd34d')};return null}
+    if(dist(player,R.spot)<18)return {i:player.inside.door.R.i,t:R.k==='house'?'잠자기<br>메뉴':'이용<br>하기',f:()=>openShop(player.inside.door)};
     if(player.y>R.z1-30)return {i:'🚪',t:'나가기',f:exitBuilding};return null}
   if(player.car){const g=nearGarage();if(g&&Math.abs(player.car.v)<2)return {i:'🔧',t:'정비소<br>이용',f:()=>openShop(g)}}
-  else{const d=nearDoor();if(d)return {i:d.R.i,t:'들어<br>가기',f:()=>enterBuilding(d)}}
+  else{const d=nearDoor();if(d)return d.kiosk?{i:d.R.i,t:'이용<br>하기',f:()=>openShop(d)}:{i:d.R.i,t:'들어<br>가기',f:()=>enterBuilding(d)};
+    const p=nearPed();if(p)return {i:p.dealer?'🕶️':p.quest?'❗':'💬',t:p.dealer?'암시장':p.quest?'부탁<br>듣기':'대화',f:()=>openPed(p)}}
   return {i:'🚗',t:'탑승<br>하차',f:toggleCar};
 }
 function doAction(){if(!started||overlay)return;if(menuOpen){closePanel();return}const a=ctxAction();if(a)a.f()}
 function interiorLogic(){if(!player.inside)return;const R=player.inside.R;if(player.y>R.z1-10&&Math.abs(player.x-R.cx)<20)exitBuilding()}
+
+// ---------- 은행 털기 ----------
+let heist=null;
+function startHeist(d){const R=player.inside&&player.inside.R;if(!R||!R.vault)return;closePanel();
+  if(WEAP[player.cur].melee)player.cur=player.weapons.pistol?'pistol':'shotgun';
+  heist={door:d,prog:0,need:600,done:false,spawned:0};wanted=Math.max(wanted,3);heat=3;calm=0;
+  toast('🚨 강도다!! 금고(오른쪽 노란 원) 앞에서 10초 버텨라!','#ff6b6b');noise(.8,2000,'bandpass',.3);
+  for(let i=0;i<3;i++)spawnGuard(R,i)}
+function spawnGuard(R,i){heist.spawned++;makePed(R.x0+rnd(30,170),R.z0+rnd(75,112),{keep:true,boss:true,hp:6,angry:9999,gun:i%3!==2,id:heist.spawned*17,
+  look:Object.assign(makeLook(),{shirt:'#2c3e50',pants:'#1b2631',hs:4,cap:'#1b2631',f:false,skirt:false,h:1.08,bag:null})})}
+function heistLogic(){if(!heist||!player.inside||!player.inside.R.vault)return;const R=player.inside.R;
+  if(!heist.done&&frame%45===0)beep(frame%90?880:660,.15,'square',.03);
+  if(heist.done)return;
+  if(dist(player,R.vault)<17){heist.prog++;if(heist.prog%150===0&&peds.filter(p=>p.x>IX0-200&&p.down<=0).length<6)spawnGuard(R,heist.spawned)}
+  if(heist.prog>=heist.need){heist.done=true;const loot=Math.round(rnd(50000,100000)*(1+.15*player.sk.stealth)*econ.infl/1000)*1000;
+    player.money+=loot;player.stats.robs++;heist.door.robDay=econ.day;gainXP(250,'은행 털기');resultCard={t:'🏦 은행 털기 성공!',grade:'💰',lines:[`현금 +${won(loot)}`,'경험치 +250 XP','빨리 나가서 경찰을 따돌려라!'],life:300};
+    noise(.4,600,'lowpass',.4);[392,523,659,784].forEach((f,i)=>setTimeout(()=>beep(f,.2,'square',.05),i*110))}}
+
+// ---------- 체포 · 감옥 · 탈옥 ----------
+function sendToJail(){
+  const pd=doors.find(d=>d.role==='경찰서'),R=INTS.jail,mins=40+wanted*40;
+  if(player.car){player.car.driver=false;player.car=null}
+  for(let i=cars.length-1;i>=0;i--)if(cars[i].police&&cars[i].driver)cars.splice(i,1);
+  const lost=player.ammo.pistol+player.ammo.shotgun>0;player.ammo.pistol=0;player.ammo.shotgun=0;if(!WEAP[player.cur].melee||player.cur==='taser')player.cur='fist';
+  failMission('체포되어 미션 실패');heist=null;
+  player.jail={left:mins,total:mins,vent:0,caught:0};player.inside={door:pd,R};player.x=R.cell.x;player.y=R.cell.y;player.a=Math.PI/2;camYaw=-Math.PI/2+.4;camSnap=true;
+  document.body.classList.add('inside');wanted=0;heat=0;bust=0;calm=0;
+  overlay={t:'체포됨',s:`형기 ${Math.round(mins/60*10)/10}시간${lost?' · 총탄 압수':''} — 보석·형기·탈옥 중 선택`,c:'#4da3ff',life:200};beep(200,.6,'sawtooth',.04);save()}
+function releaseJail(t,esc){const pd=player.inside.door;player.jail=null;player.inside=null;document.body.classList.remove('inside');
+  for(let i=peds.length-1;i>=0;i--)if(peds[i].x>IX0-200)peds.splice(i,1);
+  if(esc){player.x=pd.ox+pd.nx*40+pd.ny*40;player.y=pd.oy+pd.ny*40+pd.nx*40;if(solid(player.x,player.y)){player.x=pd.ox;player.y=pd.oy}wanted=2;heat=2;calm=0}
+  else{player.x=pd.ox;player.y=pd.oy}camYaw=Math.atan2(pd.ny,pd.nx);camSnap=true;toast(t,esc?'#ffd34d':'#7CFC7C');save()}
+function guardPos(R){const t=frame*.0042,u=(Math.sin(t)+1)/2;return {x:R.x0+108+u*80,y:R.z0+44,a:Math.cos(t)>0?0:Math.PI,moving:Math.abs(Math.cos(t))>.08}}
+function jailLogic(){const J=player.jail;if(!J||!player.inside)return;const R=player.inside.R;
+  if(!menuOpen)J.left-=1/30;if(J.left<=0)return releaseJail('🔓 형기를 다 채웠어요. 출소!');
+  const g=guardPos(R),dd=dist(g,player),look=Math.abs(angDiff(Math.atan2(player.y-g.y,player.x-g.x),g.a))<.95&&dd<115;J.seen=look;
+  if(R.vent&&dist(player,R.vent)<16){if(look){if(J.vent>0||!(J.cw>frame)){J.vent=0;J.left+=30;J.total+=30;J.caught++;J.cw=frame+180;toast('🚨 간수에게 들켰다! 형기 +30분','#ff6b6b');beep(300,.4,'sawtooth',.05);player.x=R.cell.x;player.y=R.cell.y}}
+    else{J.vent++;if(J.vent%40===0)noise(.08,3000,'bandpass',.08);if(J.vent>=420){gainXP(80,'탈옥');releaseJail('🏃 탈옥 성공! 수배 ★★ — 도망쳐!',true)}}}}
+function openJail(){panelState={type:'jail'};menuOpen=true;exitLock();renderPanel()}
+
+// ---------- 암시장 (밤에만 나타나는 무기상) ----------
+const BM_DOOR={role:'암시장',R:{i:'🕶️',k:'black',col:'#111'},x:0,y:0,ox:0,oy:0,id:-1};
+let bmSpot=null;
+function blackMarketLogic(){
+  const night=hourOf()>=20||hourOf()<5,dealer=peds.find(p=>p.dealer);
+  if(!bmSpot){const cl=doors.find(d=>d.role==='홍대 클럽')||doors[0];bmSpot=pedSpot(cl.ox,cl.oy,60,140)||{x:cl.ox+40,y:cl.oy};BM_DOOR.x=bmSpot.x;BM_DOOR.y=bmSpot.y}
+  if(night&&!dealer&&!player.inside&&dist(anchor(),bmSpot)<1300){makePed(bmSpot.x,bmSpot.y,{dealer:true,keep:true,idle:1e9,look:Object.assign(makeLook(),{f:false,shirt:'#111',pants:'#111',hs:4,cap:'#111',bag:'#222'})})}
+  if(!night&&dealer&&dist(dealer,anchor())>300)peds.splice(peds.indexOf(dealer),1);
+}
 
 // ---------- 상점 메뉴 데이터 ----------
 const FOODS={
@@ -826,6 +1034,9 @@ const FOODS={
   '고깃집':[['🥩','삼겹살 2인분',28000,100,{hp:40}],['🍲','된장찌개',8000,55],['🥗','냉면',9000,50]],
   '빵집':[['🥐','크루아상',3500,22],['🍞','소보로빵',2000,18],['🎂','생크림 케이크',25000,80,{hp:10}]],
   '호프':[['🍺','생맥주',5000,8,{buff:1}],['🍗','치맥 세트',24000,100,{hp:20,stock:'CK'}],['🥜','마른안주',6000,20]],
+  '포장마차':[['🍢','어묵꼬치',1000,10],['🌶️','떡볶이',3500,35],['🥞','호떡',1500,15],['🍤','튀김 모둠',3000,25],['🥘','순대볶음',6000,50]],
+  '자판기':[['🥤','콜라',1500,5],['🧃','이온음료',1500,8,{hp:5}],['☕','캔커피',1200,3,{buff:1}],['🍫','초코바',1500,12]],
+  '노래방':[['🥤','음료수',2000,5],['🍿','과자',3000,15]],
   '홍대 클럽':[['🍹','칵테일',12000,8,{buff:3}],['🥤','무알콜 음료',5000,5],['🕺','춤추기',0,-10,{buff:2,time:30}]],
 };
 const SHIRTS=[['빨강','#e74c3c'],['파랑','#3498db'],['노랑','#f1c40f'],['초록','#2ecc71'],['검정','#222222'],['흰색','#f2f2f2'],['보라','#8e44ad'],['분홍','#ff7eb6']];
@@ -844,6 +1055,21 @@ function shopMenu(d){
   const role=d.role,R=d.R,k=R.drive?'garage':R.k,P=[];const add=(i,n,ds,p,act,dis)=>P.push({i,n,d:ds,p,act,dis});
   let title=`${R.i} ${role}`,sub=`${districtRaw(d.x,d.y)} 지점${player.biz.includes(d.id)?' · 🏷️ 내 가게 (50% 할인)':''} · 물가 x${((DPRICE[districtRaw(d.x,d.y)]||1)*econ.infl).toFixed(2)}`,tabs=null;
   if(FOODS[role])for(const it of FOODS[role])P.push(eat(it));
+  if(role==='편의점')add('🎟️','즉석 복권',`1등 ${won(500000)} · 꽝도 있어요`,priceOf(1000),()=>{const r=Math.random();const w=r<.003?500000:r<.025?50000:r<.13?5000:r<.32?1000:0;if(w){player.money+=w;if(w>=50000)gainXP(20)}return w?`🎉 당첨! +${won(w)}`:'😢 꽝… 다음 기회에'});
+  if(role==='버스정류장'){sub='🚌 시내버스 · 수배 중엔 못 타요';for(const q of doors.filter(q=>q.role==='버스정류장'&&q!==d).sort((a,b)=>districtRaw(a.x,a.y).localeCompare(districtRaw(b.x,b.y)))){const dd=Math.hypot(q.x-d.x,q.y-d.y);
+    add('🚌',`${districtRaw(q.x,q.y)} 정류장`,`${(dd*2.5/1000).toFixed(1)}km · 약 ${Math.round(dd/40)}분`,priceOf(1400+dd*.3),()=>{closePanel();player.x=q.ox;player.y=q.oy;camSnap=true;timeTick(dd/40);gainXP(1);return `🚌 ${districtRaw(q.x,q.y)} 도착!`},wanted>0||!!player.car)}}
+  if(['store','food','cafe','pc','clothes','karaoke'].includes(k)&&!d.kiosk&&!player.biz.includes(d.id)){const can=player.cur!=='fist',done=d.robDay===econ.day;
+    add('🔫','가게 털기',done?'오늘은 이미 털었어요':can?'계산대 현금 강탈 · 수배 ★★':'무기를 들고 있어야 해요 (Q로 교체)',0,()=>{const loot=Math.round(rnd(4000,12000)*(1+.15*player.sk.stealth)*econ.infl/100)*100;
+      player.money+=loot;d.robDay=econ.day;wanted=Math.max(wanted,2);heat=Math.max(heat,2);calm=0;player.stats.robs++;gainXP(50,'강도');closePanel();noise(.3,800,'lowpass',.4);return `💰 +${won(loot)} 털었다! 수배 ★★ — 경찰이 와요`},!can||done)}
+  if(k==='karaoke'){add('🎤','노래 부르기 (1시간)','경험치 +15 · 이속↑ · 기분 전환',priceOf(10000),()=>{timeTick(60);gainXP(15,'노래');player.buff=Math.max(player.buff,3*3600);return `🎤 ${pick(['100점!','98점!','앵콜!'])}`})}
+  if(k==='academy'){
+    add('📚','공부하기 (2시간)',`경험치 +${40+player.lv*6}`,priceOf(12000),()=>{timeTick(120);player.hunger=Math.max(0,player.hunger-10);gainXP(40+player.lv*6,'공부');return '📚 머리가 똑똑해졌어요'});
+    for(const [id,n] of [['drive','운전 학원'],['gun','사격 교육'],['talk','화술 강의'],['stealth','손기술 교실']])add('🎓',`${n}`,`${SKILLS.find(q=>q[0]===id)[2]} 스킬 +1 (현재 ${player.sk[id]}/5)`,priceOf(60000+player.sk[id]*30000),()=>{player.sk[id]++;timeTick(180);gainXP(20);return '🎓 수료!'},player.sk[id]>=5)}
+  if(k==='black'){sub='🕶️ 레벨 제한 없음 · 비싸요 · 경찰 조심';
+    const bw=(id,n,base,am)=>add(WEAP[id].i,n,player.weapons[id]?`보유 중 · 탄약 +${am}`:`탄약 ${am}발 포함`,priceOf(base*1.6),()=>{player.weapons[id]=1;player.ammo[id]+=am;player.cur=id;return `🕶️ ${n} 입수…`});
+    bw('pistol','권총',15000,24);bw('shotgun','산탄총',40000,10);bw('taser','테이저건',8000,10);
+    add('🦺','중고 방탄조끼','방어 100',priceOf(9000),()=>{player.armor=100;return '🦺 착용'},player.armor>=100);
+    add('🪪','위조 번호판','수배 1단계 낮추기',priceOf(15000),()=>{wanted=Math.max(0,wanted-1);heat=wanted;return '🪪 신분 세탁 완료'},!wanted)}
   if(k==='gun'){
     const g=(id,n,base,am,ds)=>add(WEAP[id].i,n,ds,priceOf(base),()=>{player.weapons[id]=1;if(am)player.ammo[id]+=am;player.cur=id;return `${WEAP[id].i} ${n} 구매!`},player.weapons[id]&&!am);
     g('bat','야구방망이',3000,0,player.weapons.bat?'보유 중':'근접 공격력 2배');
@@ -851,6 +1077,7 @@ function shopMenu(d){
     if(!player.weapons.pistol)g('pistol','권총 (+24발)',15000,24,'연사 가능 · 사거리 김');
     if(!player.weapons.shotgun)g('shotgun','산탄총 (+10발)',40000,10,'근거리 강력 · 차량 폭파');
     const am=(id,n,base,q)=>add('📦',n,`보유 ${player.ammo[id]}발`,priceOf(base),()=>{player.ammo[id]+=q;return `${n} 구매`},!player.weapons[id]);
+    for(const it of P){if(it.n.startsWith('권총')&&player.lv<3){it.dis=true;it.d='🔒 Lv.3 필요 (암시장은 밤에 제한 없음)'}if(it.n.startsWith('산탄총')&&player.lv<5){it.dis=true;it.d='🔒 Lv.5 필요 (암시장은 밤에 제한 없음)'}}
     am('taser','테이저 카트리지 10발',2000,10);am('pistol','권총탄 24발',2500,24);am('shotgun','산탄 10발',4000,10);
     add('🦺','방탄조끼','피해의 70%를 흡수 (방어 100)',priceOf(6000),()=>{player.armor=100;return '🦺 방탄조끼 착용!'},player.armor>=100);
   }
@@ -882,9 +1109,9 @@ function shopMenu(d){
     for(const q of own){const v=Math.round(bizValue(q)*.8);add('💸',`${q.role} 매각 (${districtRaw(q.x,q.y)})`,`매각가 ${won(v)} (가치의 80%)`,0,()=>{player.biz=player.biz.filter(i=>i!==q.id);player.money+=v;return `💸 매각 +${won(v)}`})}
   }
   if(k==='dealer'){
-    for(const [t,n,base] of CARSHOP){const pr=Math.round(base*econ.infl/1000)*1000;add('🚘',n,`최고속 ${Math.round(TYPES[t].max*18)}km/h${player.ownedCar&&player.ownedCar.type===t?' · 보유 중':''}`,pr,()=>{
+    for(const [t,n,base] of CARSHOP){const pr=Math.round(base*econ.infl/1000)*1000,need=t==='sports'?4:t==='bus'?3:1;add('🚘',n,player.lv<need?`🔒 Lv.${need} 필요`:`최고속 ${Math.round(TYPES[t].max*18)}km/h${player.ownedCar&&player.ownedCar.type===t?' · 보유 중':''}`,pr,()=>{
       player.ownedCar={type:t,col:t==='taxi'?TYPES.taxi.col:pick(CARCOLS.concat(['#e01b24','#ffb400','#0fb9b1'])),tune:1};bumpStock('SM',.01);
-      closePanel();exitBuilding();const c=spawnOwned(d);if(c){camSnap=true;toast(`🚘 ${n} 출고! 매장 앞에 있어요 (지도 🚘)`,'#7CFC7C')}return null})}
+      closePanel();exitBuilding();const c=spawnOwned(d);if(c){camSnap=true;toast(`🚘 ${n} 출고! 매장 앞에 있어요 (지도 🚘)`,'#7CFC7C')}return null});if(player.lv<need)P[P.length-1].dis=true}
   }
   if(k==='police'){
     add('🙇','자수하기',wanted?`수배 ${wanted}단계 해제 · 벌금`:'수배 중이 아니에요',priceOf(3000*Math.max(1,wanted)),()=>{wanted=0;heat=0;calm=0;for(let i=cars.length-1;i>=0;i--)if(cars[i].police&&cars[i].driver)cars.splice(i,1);return '👮 수배가 해제되었어요'},!wanted);
@@ -919,12 +1146,14 @@ function shopMenu(d){
 const SAVE='seoul3d_v2';
 function save(){try{localStorage.setItem(SAVE,JSON.stringify({v:2,
   p:{money:player.money,bank:player.bank,loan:player.loan,hp:player.hp,maxHp:player.maxHp,armor:player.armor,hunger:player.hunger,weapons:player.weapons,ammo:player.ammo,cur:player.cur,
-    str:player.str,look:player.look,house:player.house,biz:player.biz,stocks:player.stocks,ownedCar:player.ownedCar,stats:player.stats},
+    str:player.str,look:player.look,house:player.house,biz:player.biz,stocks:player.stocks,ownedCar:player.ownedCar,stats:player.stats,xp:player.xp,lv:player.lv,sp:player.sp,sk:player.sk,jail:player.jail},
+  set:settings,
   e:{day:econ.day,min:econ.min,infl:econ.infl,s:econ.stocks.map(s=>[s.p,s.open])}}))}catch(e){}}
 function load(){try{const s=JSON.parse(localStorage.getItem(SAVE)||'null');if(!s||s.v!==2)return false;
-  Object.assign(player,s.p);player.hp=Math.max(30,player.hp);econ.day=s.e.day;econ.min=s.e.min;econ.infl=s.e.infl;
+  const sk=Object.assign({},player.sk,s.p.sk||{}),st=Object.assign({},player.stats,s.p.stats||{});Object.assign(player,s.p);player.sk=sk;player.stats=st;if(s.set)Object.assign(settings,s.set);player.hp=Math.max(30,player.hp);
+  if(player.jail){const R=INTS.jail;player.inside={door:doors.find(d=>d.role==='경찰서'),R};player.x=R.cell.x;player.y=R.cell.y;document.body.classList.add('inside')}econ.day=s.e.day;econ.min=s.e.min;econ.infl=s.e.infl;
   s.e.s.forEach((v,i)=>{const q=econ.stocks[i];if(q){q.p=v[0];q.open=v[1];q.hist=[v[0]]}});
-  if(player.ownedCar)spawnOwned(player);return true}catch(e){return false}}
+  if(player.ownedCar&&!player.jail)spawnOwned(player);return true}catch(e){return false}}
 function resetSave(){try{localStorage.removeItem(SAVE)}catch(e){}location.reload()}
 const loaded=load();
 refreshOffers();
@@ -945,15 +1174,18 @@ function wantedLogic(){
     calm=seen?0:calm+1;
     if(calm>420){wanted--;heat=wanted;calm=0;toast(wanted?'수배 레벨 감소':'수배 해제! 따돌렸다','#7CFC7C')}
     bust=near?bust+1:Math.max(0,bust-2);
-    if(bust>150){const fine=Math.max(1000,Math.round(player.money*.1/100)*100);player.money=Math.max(0,player.money-fine);
-      const lost=player.ammo.pistol+player.ammo.shotgun>0;player.ammo.pistol=0;player.ammo.shotgun=0;
-      overlay={t:'체포됨',s:`벌금 ${won(fine)}${lost?' · 탄약 압수':''}`,c:'#4da3ff',life:180};failMission('체포되어 미션 실패');
-      respawnAtDoor(doors.find(d=>d.role==='경찰서'));beep(200,.6,'sawtooth',.04);save()}
+    if(bust>150)sendToJail()
   }else if(!player.inside){bust=0;calm=0}
   if(player.hp<=0){const fee=priceOf(2000,doors[0]);player.money=Math.max(0,player.money-fee);player.hp=player.maxHp*.6;player.hunger=Math.max(player.hunger,40);player.armor=0;
     overlay={t:'의식을 잃었다',s:'병원비 '+won(fee),c:'#ff5e5e',life:180};failMission('쓰러져서 미션 실패');
     respawnAtDoor(doors.find(d=>d.role==='병원'));save()}
 }
+
+// ---------- 날씨 · 구름 · 배 ----------
+let rainK=0,cloudK=0;
+const boats=[];for(let i=0;i<3;i++)boats.push({x:rnd(0,WW),z:RIVER_T+40+i*55,v:(i%2?-1:1)*rnd(.5,.9),col:pick(['#ecf0f1','#e74c3c','#f1c40f'])});
+function ambientTick(){const w=econ.weather;rainK+=((w==='rain'?1:0)-rainK)*.004;cloudK+=((w==='clear'?.25:1)-cloudK)*.004;
+  for(const b of boats){b.x+=b.v;if(b.x>WW+100)b.x=-100;if(b.x<-100)b.x=WW+100}}
 
 // =====================================================================
 // ---------- 메인 업데이트 ----------
@@ -965,10 +1197,12 @@ function update(){
   timeTick();
   if(player.car)drivePlayer(player.car);else walkPlayer();
   for(const c of cars){if(c===player.car)continue;
+    if(c.racer){racerMove(c);continue}
     if(c.police&&c.driver)policeAI(c);else if(c.ai&&c.driver&&c.hp>0)aiDrive(c);else coast(c);
     if(c.hp<35&&frame%4===0&&Math.abs(c.x-player.x)<1500)parts.push({x:c.x,y:c.y,vx:rnd(-.3,.3),vy:rnd(-.6,-.2),life:60,r:rnd(4,8),dark:c.hp<=0})}
   if(player.car&&player.car.hp<35&&frame%4===0)parts.push({x:player.car.x,y:player.car.y,vx:rnd(-.3,.3),vy:rnd(-.6,-.2),life:60,r:rnd(4,8),dark:player.car.hp<=0});
-  combat();carCollisions();hits();updatePeds();needs();wantedLogic();missionLogic();interiorLogic();
+  combat();carCollisions();hits();updatePeds();needs();wantedLogic();missionLogic();interiorLogic();heistLogic();jailLogic();ambientTick();
+  if(frame%60===0)blackMarketLogic();if(lvFx>0)lvFx--;for(let i=xpFx.length-1;i>=0;i--)if(--xpFx[i].life<=0)xpFx.splice(i,1);if(resultCard&&--resultCard.life<=0)resultCard=null;
   if(frame%15===0)populate();
   for(let i=skids.length-1;i>=0;i--)if(--skids[i].life<=0)skids.splice(i,1);if(skids.length>500)skids.splice(0,skids.length-500);
   for(let i=parts.length-1;i>=0;i--){const p=parts[i];p.x+=p.vx;p.y+=p.vy;p.r+=.15;if(--p.life<=0)parts.splice(i,1)}
@@ -994,7 +1228,7 @@ addEventListener('keydown',e=>{
 });
 addEventListener('keyup',e=>keys[e.code]=false);
 addEventListener('pointerdown',e=>{if(!started&&!e.target.closest('#panel'))start()});
-glc.addEventListener('pointerdown',e=>{if(started&&!menuOpen&&e.pointerType==='mouse'&&e.button===0)attack()});
+function exitLock(){try{if(document.pointerLockElement)document.exitPointerLock()}catch(e){}}
 function start(){started=true;try{audio=new (window.AudioContext||window.webkitAudioContext)();noiseBuf=audio.createBuffer(1,audio.sampleRate*.3|0,audio.sampleRate);const d=noiseBuf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1}catch(e){}
   setTimeout(()=>{const h=document.getElementById('help');if(h)h.style.display='none'},25000);
   toast(loaded?`다시 오셨군요! ${econ.day}일차 · ${won(player.money)}`:(isTouch?'환영합니다! 빨간 차에 다가가 🚗 버튼':'서울에 오신 걸 환영합니다! 빨간 스포츠카에 다가가 F키'),'#ffd34d');
@@ -1046,6 +1280,15 @@ void main(){
       }
       lit*=.58+.42*smoothstep(0.,26.,vw3.y);
     }
+    if(vf>4.5){
+      if(abs(N.y)<.5){float hx=abs(N.x)>.5?vw3.z:vw3.x;float fx=fract(hx/9.),fy=fract(vw3.y/11.);
+        vec3 V=normalize(cam-vw3);float fr=pow(1.-max(dot(N,V),0.),2.);
+        float r=h21(vec2(floor(hx/9.),floor(vw3.y/11.))+N.xz*3.);
+        col=mix(vc*.6,mix(fogC*1.08,vec3(.95,.97,1.),.25*day),.3+.55*fr)*(.9+.2*r);
+        col=mix(col,vec3(1.,.86,.58),step(.55,r)*(1.-day)*.85);
+        if(fx<.07||fy<.09)col=vc*.32*dk;
+        lit=vec3(1.)+vec3(.15)*d*day;}
+    }
     col*=lit;
     if(vf>2.5&&vf<3.5){
       vec3 V=normalize(cam-vw3);vec3 H=normalize(L+V);
@@ -1055,7 +1298,7 @@ void main(){
     }
   }
   float dist=length(vw3-cam);float f=clamp((dist-fogN)/(fogF-fogN),0.,1.);
-  if(vf>3.5)f=.42+.3*clamp(dist/4500.,0.,1.);
+  if(vf>3.5&&vf<4.5)f=.42+.3*clamp(dist/4500.,0.,1.);
   gl_FragColor=vec4(mix(col,fogC,f),alpha);
 }`;
 const GVS=`attribute vec3 p;attribute vec2 uv;uniform mat4 vp;varying vec2 vuv;varying vec3 vw3;
@@ -1065,7 +1308,7 @@ precision highp float;
 #else
 precision mediump float;
 #endif
-uniform sampler2D tex;uniform vec3 cam;uniform vec3 fogC;uniform float fogN;uniform float fogF;uniform float t;uniform float day;
+uniform sampler2D tex;uniform vec3 cam;uniform vec3 fogC;uniform float fogN;uniform float fogF;uniform float t;uniform float day;uniform float wet;
 varying vec2 vuv;varying vec3 vw3;
 float h21(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 void main(){
@@ -1081,19 +1324,26 @@ void main(){
     col*=.93+.1*h21(floor(vw3.xz*.5));
     col*=vec3(1.03,1.,.96);
   }
+  if(wet>.01&&!(col.b>col.r+.2)){vec3 V=normalize(cam-vw3);float fr=pow(1.-max(V.y,0.),4.);col=mix(col*(1.-.22*wet),fogC,fr*.55*wet)+wet*.05*smoothstep(.96,1.,h21(floor(vw3.xz*.7)+floor(t*6.)));}
   col*=mix(.2,1.,day);col+=vec3(.02,.025,.05)*(1.-day);
   float f=clamp((dist-fogN)/(fogF-fogN),0.,1.);
   gl_FragColor=vec4(mix(col,fogC,f),1.);
 }`;
-const SVS=`attribute vec2 p;varying float vy;void main(){vy=p.y;gl_Position=vec4(p,.9999,1.);}`;
-const SFS=`precision mediump float;uniform float hz;uniform vec3 top;uniform vec3 hor;varying float vy;
-void main(){float t=clamp((vy-hz)*.85,0.,1.);vec3 c=mix(hor,top,sqrt(t));c+=vec3(.07,.05,.01)*(1.-t)*(1.-t)*(1.-t);gl_FragColor=vec4(c,1.);}`;
+const SVS=`attribute vec2 p;varying vec2 vp;void main(){vp=p;gl_Position=vec4(p,.9999,1.);}`;
+const SFS=`precision mediump float;uniform float hz;uniform vec3 top;uniform vec3 hor;uniform float yaw;uniform float ck;uniform float t;uniform float asp;uniform vec3 cc;varying vec2 vp;
+float h(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float n(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.-2.*f);return mix(mix(h(i),h(i+vec2(1.,0.)),f.x),mix(h(i+vec2(0.,1.)),h(i+vec2(1.,1.)),f.x),f.y);}
+void main(){float tt=clamp((vp.y-hz)*.85,0.,1.);vec3 c=mix(hor,top,sqrt(tt));c+=vec3(.07,.05,.01)*(1.-tt)*(1.-tt)*(1.-tt);
+  if(tt>.01){vec2 q=vec2(vp.x*asp*.8+yaw*2.5+t,(vp.y-hz)*2.2)/(tt*1.4+.3);
+    float cl=n(q*1.2)*.62+n(q*2.7+7.3)*.38;cl=smoothstep(1.-ck*.7,1.12-ck*.35,cl)*smoothstep(0.,.12,tt);
+    c=mix(c,cc,cl*.9);}
+  gl_FragColor=vec4(c,1.);}`;
 function prog(vs,fs){const p=gl.createProgram();for(const [t,s] of [[gl.VERTEX_SHADER,vs],[gl.FRAGMENT_SHADER,fs]]){const sh=gl.createShader(t);gl.shaderSource(sh,s);gl.compileShader(sh);if(!gl.getShaderParameter(sh,gl.COMPILE_STATUS))throw new Error(gl.getShaderInfoLog(sh));gl.attachShader(p,sh)}gl.linkProgram(p);return p}
 const P1=prog(VS,FS),P2=prog(GVS,GFS),P3=prog(SVS,SFS);
 const U1={},U2={},U3={};
 for(const u of ['vp','cam','fogC','fogN','fogF','alpha','day'])U1[u]=gl.getUniformLocation(P1,u);
-for(const u of ['vp','cam','fogC','fogN','fogF','tex','t','day'])U2[u]=gl.getUniformLocation(P2,u);
-for(const u of ['hz','top','hor'])U3[u]=gl.getUniformLocation(P3,u);
+for(const u of ['vp','cam','fogC','fogN','fogF','tex','t','day','wet'])U2[u]=gl.getUniformLocation(P2,u);
+for(const u of ['hz','top','hor','yaw','ck','t','asp','cc'])U3[u]=gl.getUniformLocation(P3,u);
 const A1={p:gl.getAttribLocation(P1,'p'),n:gl.getAttribLocation(P1,'n'),c:gl.getAttribLocation(P1,'c'),w:gl.getAttribLocation(P1,'w')};
 const A2={p:gl.getAttribLocation(P2,'p'),uv:gl.getAttribLocation(P2,'uv')};
 const A3={p:gl.getAttribLocation(P3,'p')};
@@ -1260,16 +1510,30 @@ for(const b of allB){
   if(b.label==='63빌딩'){S.prism(cx,0,cz,b.w/2,b.h/2,b.w/2-12,b.h/2-12,420,0,hex('#d9a62e'),1);labels.push({x:cx,y:450,z:cz,t:b.label,big:true});continue}
   let h=H3(b);
   if(b.label==='코엑스')h=90;else if(b.label)h=110;
-  S.box(cx,0,cz,b.w/2,b.h/2,h,0,col,1);
+  const glass=h>190&&!b.door&&Math.random()<.6;
+  if(glass){const gc=pick([[.42,.58,.72],[.35,.5,.55],[.55,.62,.7],[.3,.4,.55]]);S.box(cx,0,cz,b.w/2,b.h/2,h,0,gc,5);S.box(cx,h,cz,b.w/2-6,b.h/2-6,8,0,gc.map(v=>v*.8),5)}
+  else S.box(cx,0,cz,b.w/2,b.h/2,h,0,col,1);
+  if(h>80&&!glass){if(Math.random()<.55)S.cyl(cx+b.w/4,h+1,cz-b.h/4,6,6,10,8,hex('#8d6e63'));
+    for(let i=0;i<2;i++)if(Math.random()<.6)S.box(cx+rnd(-b.w/3,b.w/3),h+1,cz+rnd(-b.h/3,b.h/3),4,3,3,0,hex('#b2bec3'));
+    if(Math.random()<.3)S.box(cx-b.w/4,h+1,cz+b.h/4,.5,.5,rnd(15,30),0,hex('#636e72'))}
+  if(h>70&&h<220&&Math.random()<.18){const side=Math.random()<.5;S.box(cx,h+2,cz,side?1:b.w/2.6,side?b.h/2.6:1,1,0,hex('#555'));S.box(cx,h+6,cz,side?.8:b.w/2.6,side?b.h/2.6:.8,16,0,hex(pick(['#ff4757','#1e90ff','#ffa502','#2ed573','#a29bfe','#ff6b81'])),2)}
   S.box(cx,0,cz,b.w/2+.6,b.h/2+.6,6,0,col.map(v=>v*.72));
   S.box(cx,h,cz,b.w/2,b.h/2,2.2,0,col.map(v=>Math.min(1,v*1.12)));
   S.box(cx,h,cz,b.w/2-3,b.h/2-3,1.2,0,col.map(v=>v*.7));
-  if(Math.random()<.45)S.box(cx+rnd(-b.w/4,b.w/4),h+1,cz+rnd(-b.h/4,b.h/4),rnd(5,9),rnd(5,9),rnd(5,10),0,hex('#9aa0a6'));
+  if(!glass&&Math.random()<.45)S.box(cx+rnd(-b.w/4,b.w/4),h+1,cz+rnd(-b.h/4,b.h/4),rnd(5,9),rnd(5,9),rnd(5,10),0,hex('#9aa0a6'));
   if(b.label&&!b.door){labels.push({x:cx,y:h+40,z:cz,t:b.label,big:b.label==='코엑스'})}
   if(b.label==='병원')S.box(cx,h+3,cz,6,20,2,0,hex('#e33'),2),S.box(cx,h+3,cz,20,6,2,0,hex('#e33'),2);
 }
 // 가게 정면: 유리문, 쇼윈도, 차양, 간판
-for(const d of doors){const S=SG(d.x,d.y),rc=hex(d.R.col),alongX=d.nx===0,a=alongX?0:Math.PI/2,ox=d.nx,oy=d.ny;
+for(const d of doors){if(!d.kiosk)continue;const S=SG(d.x,d.y),x=d.x,z=d.y,f=d.ny,rc=hex(d.R.col);
+  if(d.role==='포장마차'){S.box(x,0,z,9,6,7,0,hex('#8d6e63'));for(const sx of [-1,1])for(const sz of [-1,1])S.box(x+sx*8.5,0,z+sz*5.5,.4,.4,15,0,hex('#555'));
+    S.prism(x,15,z,10.5,7,6,3,4,0,hex('#e74c3c'));S.box(x,7,z,8,5,.6,0,hex('#ecf0f1'));for(const sx of [-5,0,5])S.box(x+sx,11,z+f*6.6,.9,.9,1.8,0,hex('#ff7b2e'),2)}
+  if(d.role==='자판기'){S.box(x,0,z,2.6,2,13,0,rc);S.box(x,3,z+f*2.1,2,.2,8,0,hex('#dff9fb'),2)}
+  if(d.role==='ATM'){S.box(x,0,z,2.6,2,11,0,hex('#7f8c8d'));S.box(x,6,z+f*2.1,1.8,.2,3,0,hex('#48dbfb'),2);S.box(x,11,z,2.8,2.2,2,0,rc,2)}
+  if(d.role==='버스정류장'){S.box(x,0,z-f*3,12,.3,12,0,hex('#9cc3dc'),3);S.box(x,12,z,13,3.5,.8,0,hex('#2d3436'));for(const sx of [-1,1])S.box(x+sx*11.5,0,z-f*2.5,.4,.4,12,0,hex('#555'));
+    S.box(x,0,z-f*1.5,9,1.2,3.5,0,hex('#a0703a'));S.box(x+15,0,z,.4,.4,17,0,hex('#555'));S.box(x+15,15,z,2.5,.3,3,0,rc,2)}
+  labels.push({x:d.x,y:22,z:d.y,t:d.R.i+' '+d.role,near:true,door:d})}
+for(const d of doors){if(d.kiosk)continue;const S=SG(d.x,d.y),rc=hex(d.R.col),alongX=d.nx===0,a=alongX?0:Math.PI/2,ox=d.nx,oy=d.ny;
   const at=(t,o)=>[d.x+ox*o+(alongX?t:0),d.y+oy*o+(alongX?0:t)];
   if(d.R.drive){let p=at(0,.4);S.box(p[0],0,p[1],14,.8,16,a,hex('#555b63'));for(let k=0;k<4;k++){p=at(0,.9);S.box(p[0],2+k*3.6,p[1],13,.5,.5,a,hex('#8a9097'))}}
   else{let p=at(0,.5);S.box(p[0],0,p[1],5,.9,13,a,hex('#24313d'),3);
@@ -1278,6 +1542,18 @@ for(const d of doors){const S=SG(d.x,d.y),rc=hex(d.R.col),alongX=d.nx===0,a=alon
   p=at(0,.7);S.box(p[0],17,p[1],16,.8,6,a,rc,2);
   labels.push({x:d.ox,y:27,z:d.oy,t:d.R.i+' '+d.role,near:true,door:d});
 }
+// 인도 소품: 가로수 화단, 벤치, 쓰레기통, 소화전, 볼라드
+{const near=(x,y,r)=>doors.some(d=>Math.abs(d.ox-x)<r&&Math.abs(d.oy-y)<r);
+  const prop=(x,y,a)=>{const S=SG(x,y),k=Math.random();if(isTouch&&k>.72)return;
+    if(k<.38){S.box(x,0,y,4,4,2.2,0,hex('#7f8c8d'));S.box(x,0,y,1,1,9,0,hex('#6b4a2f'));const tc=hex(pick(['#2f6b2a','#3c7f33','#4b8b3b']));S.prism(x,7,y,5.5,5.5,4,4,4,a,tc);S.prism(x,11,y,5,5,0,0,7,a,tc.map(v=>v*1.15))}
+    else if(k<.56){S.box(x,0,y,5,1.6,2.6,a,hex('#a0703a'));S.box(x,2.6,y,5,.4,3,a,hex('#8d6e63'))}
+    else if(k<.72){S.box(x,0,y,1.3,1.3,4.5,0,hex(pick(['#2d3436','#27ae60','#2980b9'])))}
+    else if(k<.84){S.box(x,0,y,1,1,3.6,0,hex('#c0392b'));S.box(x,3.6,y,.6,.6,.8,0,hex('#c0392b'))}
+    else for(const o of [-3,0,3])S.box(x+Math.cos(a)*o,0,y+Math.sin(a)*o,.5,.5,3,0,hex('#bdc3c7'))};
+  for(let r=0;r<=ROWS;r++){if(r===4)continue;for(let c=0;c<COLS;c++)for(const sd of [-1,1]){const cr=sd>0?r:r-1;if(cr<0||cr>=ROWS)continue;const cell=cells[c+','+cr];if(!cell||cell.ground)continue;
+    for(let x=c*G+RW+40;x<(c+1)*G-RW-30;x+=rnd(85,140)){const y=r*G+sd*(RW+4);if(!near(x,y,24))prop(x,y,0)}}}
+  for(let c=0;c<=COLS;c++){for(let r=0;r<ROWS;r++)for(const sd of [-1,1]){const cc=sd>0?c:c-1;if(cc<0||cc>=COLS)continue;const cell=cells[cc+','+r];if(!cell||cell.ground)continue;
+    for(let y=r*G+RW+40;y<(r+1)*G-RW-30;y+=rnd(85,140)){const x=c*G+sd*(RW+4);if(!near(x,y,24)&&!isWater(x,y))prop(x,y,Math.PI/2)}}}}
 for(const t of trees){const tc=hex(Math.random()<.5?'#2f6b2a':'#3c7f33'),tc2=tc.map(v=>v*1.18),S=SG(t.x,t.y);
   S.box(t.x,0,t.y,1.6,1.6,10,0,hex('#6b4a2f'));S.prism(t.x,7,t.y,t.r*.75,t.r*.75,t.r,t.r,t.r*.75,t.x,tc);S.prism(t.x,7+t.r*.75,t.y,t.r,t.r,0,0,t.r*1.7,t.x,tc2)}
 for(const c in BRIDGES){const x=c*G;
@@ -1312,6 +1588,11 @@ for(const k of IKINDS){const R=INTS[k],g=new Geo(1<<14),fc=hex(IFLOOR[k]),wc=hex
   for(const f of R.furn){if(f.car){const c=hex(f.col);g.box(f.X,2,f.Z,f.hw,f.hd,7,0,c,3);g.box(f.X-3,9,f.Z,f.hw*.5,f.hd*.85,5,0,hex('#1d2833'),3);
       for(const sx of [-1,1])for(const sz of [-1,1])g.box(f.X+sx*f.hw*.62,0,f.Z+sz*(f.hd-.5),3.2,1.5,6,0,hex('#151515'));continue}
     if(f.dance)continue;
+    if(f.bars){const lx=f.hw>f.hd;for(let t=-(lx?f.hw:f.hd);t<=(lx?f.hw:f.hd);t+=5)g.box(f.X+(lx?t:0),0,f.Z+(lx?0:t),.5,.5,f.h,0,hex('#4b4b4b'));g.box(f.X,f.h-1,f.Z,f.hw,f.hd,1,0,hex('#4b4b4b'));g.box(f.X,0,f.Z,f.hw,f.hd,1,0,hex('#4b4b4b'));continue}
+    if(f.ventd){g.box(f.X,6,f.Z,f.hw,f.hd,7,0,hex(f.col));for(let j=0;j<4;j++)g.box(f.X,7+j*1.6,f.Z+f.hd,f.hw-.6,.2,.4,0,hex('#2d3436'));continue}
+    if(f.vault){g.cyl(f.X-.5,4,f.Z,14,14,.1,1,hex('#000'));g.box(f.X-1,0,f.Z,1.5,f.hd,f.h,0,hex('#7f8c8d'),3);g.cyl(f.X-3,13,f.Z,9,9,.1,1,hex('#000'));
+      for(let j=0;j<6;j++){const a=j/6*Math.PI*2;g.box(f.X-3,13+Math.sin(a)*5,f.Z+Math.cos(a)*5,1,.6,1.2,0,hex('#bdc3c7'))}g.box(f.X-3.5,11,f.Z,1.5,1.5,4,0,hex('#ffd32a'),2);continue}
+    if(f.screen){g.box(f.X,8,f.Z,f.hw,f.hd,f.h,0,hex('#111'));g.box(f.X,9,f.Z+f.hd+.1,f.hw-1,.1,f.h-2,0,hex('#7d5fff'),2);continue}
     g.box(f.X,0,f.Z,f.hw,f.hd,f.h,0,hex(f.col),f.w||0);
     if(k==='store'&&f.h===18)for(let i=0;i<3;i++)for(let j=0;j<6;j++)g.box(f.X-f.hw+5+j*(f.hw*2-10)/5,4+i*5,f.Z+f.hd,1.6,.8,3,0,hex(pick(['#e74c3c','#f1c40f','#3498db','#2ecc71','#ff7eb6'])));
     if(k==='pc'&&f.h===9)for(let j=0;j<5;j++){g.box(f.X-f.hw+7+j*(f.hw*2-14)/4,9,f.Z,3.5,.6,5,0,hex('#111'));g.box(f.X-f.hw+7+j*(f.hw*2-14)/4,10,f.Z+.7,3,.1,4,0,hex('#4ac1ff'),2)}
@@ -1401,6 +1682,7 @@ function personGeo(x,y,a,L,s){
     if(L.hs===1)HR(-.45*sc,hY+.7*sc,1.25*sc,1.66*sc,2.6*sc);
     if(L.hs===2)HR(-1.15*sc,hY-2.6*sc,.7*sc,1.7*sc,5.2*sc);
     if(L.hs===3)HR(-2.1*sc,hY-.6*sc,.6,.6,3.2*sc)}
+  if(s.umb){const ux=x+rx*1.6,uz=y+rz*1.6;dyn.limb(ux,shY-1,uz,ux,shY+8.5*sc,uz,.18,.18,rx,rz,C.gun,false);dyn.prism(ux,shY+7*sc,uz,7.5,7.5,.3,.3,2.6,a,pc(L.umbC||(L.umbC=pick(['#e74c3c','#2980b9','#f1c40f','#2d3436','#e84393','#ecf0f1']))))}
   // 팔
   const ext=s.atk>0?Math.sin((1-s.atk/16)*Math.PI):0;
   for(const k of [-1,1]){
@@ -1423,7 +1705,9 @@ function personGeo(x,y,a,L,s){
       else dyn.limb(Hx,Hy,Hz,Hx+dx*2.6,Hy+dy*2.6,Hz+dz*2.6,.38,.7,rx,rz,s.wpn==='taser'?C.taser:C.gun)}
   }
 }
-function pedAnim(p){const sp=p.spd||0;return {ph:p.step,amp:sp<.05?0:sp<1?.85:sp<2.6?1.2:1.6,atk:p.atk,side:p.side||1,hit:p.hit>0&&p.hit%4<2,down:p.down>0,wpn:p.boss?'bat':null}}
+function pedAnim(p){const sp=p.spd||0;return {ph:p.step,amp:sp<.05?0:sp<1?.85:sp<2.6?1.2:1.6,atk:p.atk,side:p.side||1,hit:p.hit>0&&p.hit%4<2,down:p.down>0,
+  wpn:p.gun?'pistol':p.boss?'bat':null,aim:p.gun&&p.aimT>0,umb:p.umb&&rainK>.3&&!p.boss&&!p.angry&&p.flee<=0}}
+const JAILGUARD={f:false,shirt:'#34495e',pants:'#2c3e50',skin:'#e8b98d',hair:'#151010',hs:4,cap:'#2c3e50',shoe:'#111',skirt:false,bag:null,h:1.1};
 
 // ---- 행렬 ----
 function persp(fy,as,n,f){const t=1/Math.tan(fy/2);return [t/as,0,0,0,0,t,0,0,0,0,(f+n)/(n-f),-1,0,0,2*f*n/(n-f),0]}
@@ -1443,13 +1727,15 @@ function inView(x,z,r){const dx=x-eye[0],dz=z-eye[2],al=dx*camF[0]+dz*camF[1];if
   return Math.abs(dz*camF[0]-dx*camF[1])<=al*tanH+r*tanHc}
 function updateCamera(){
   const P=pp(),car=player.car,ins=!!player.inside;
-  if(car){camYaw=lerpAng(camYaw,car.a,camMode?.04:.07)}
-  else if(player.moving&&Math.abs(angDiff(player.a,camYaw))<2.3)camYaw=lerpAng(camYaw,player.a,ins?.02:.03);
+  const manual=frame-manualT<(car?110:280);
+  if(car){if(!manual)camYaw=lerpAng(camYaw,car.a,camMode?.04:.07)}
+  else if(!manual&&player.moving&&Math.abs(angDiff(player.a,camYaw))<2.3)camYaw=lerpAng(camYaw,player.a,ins?.02:.03);
   const sp=car?Math.abs(car.v):0,fx=Math.cos(camYaw),fy=Math.sin(camYaw);
   let dist,h;
   if(ins){dist=58;h=84}
   else if(camMode===1){dist=car?170:120;h=car?330:240}
   else{dist=car?(car.type==='bus'?150:100)+sp*3.5:62;h=car?(car.type==='bus'?62:42)+sp*1.2:34}
+  h=Math.max(ins?22:5,h+camPitch*dist*1.15);if(camPitch<0)dist*=1+camPitch*.35;
   const want=[P.x-fx*dist,h,P.y-fy*dist];
   const k=camSnap?1:.13;camSnap=false;
   for(let i=0;i<3;i++)camP[i]+=(want[i]-camP[i])*k;
@@ -1481,18 +1767,19 @@ function render3D(){
   updateCamera();
   const dk=player.inside?1:dayK(),h=hourOf(),sunset=(h>15&&h<21)||(h>4&&h<9)?Math.sin(clamp(dk,0,1)*Math.PI)*.7:0;
   SKY=mixc([.05,.07,.13],[.72,.83,.93],dk);SKY=[SKY[0]+.22*sunset,SKY[1]+.07*sunset,SKY[2]-.06*sunset];SKY_TOP=mixc([.01,.02,.06],[.30,.53,.84],dk);
+  const gw=Math.max(rainK,(cloudK-.25)*.5);if(!player.inside&&gw>.01){const gr=[.5*dk+.06,.53*dk+.07,.57*dk+.09];SKY=mixc(SKY,gr,.65*gw);SKY_TOP=mixc(SKY_TOP,gr.map(v=>v*.8),.75*gw)}
   const ins=player.inside,FOG=ins?[.06,.06,.08]:SKY;
   gl.viewport(0,0,glc.width,glc.height);
   gl.clearColor(FOG[0],FOG[1],FOG[2],1);gl.clear(gl.COLOR_BUFFER_BIT|gl.DEPTH_BUFFER_BIT);
-  const fogN=ins?2000:camMode?900:550,fogF=ins?4000:camMode?2600:1900;
+  const fogN=ins?2000:(camMode?900:550)*(1-.4*rainK),fogF=ins?4000:(camMode?2600:1900)*(1-.3*rainK);
   if(!ins){
     {const m=VP,x=eye[0]+camF[0]*4000,y=eye[1],z=eye[2]+camF[1]*4000,cy=m[1]*x+m[5]*y+m[9]*z+m[13],w=m[3]*x+m[7]*y+m[11]*z+m[15];
       gl.disable(gl.DEPTH_TEST);gl.depthMask(false);gl.disable(gl.CULL_FACE);gl.useProgram(P3);useAttrs([A3.p]);
-      gl.uniform1f(U3.hz,w>0?cy/w:-1);gl.uniform3fv(U3.top,SKY_TOP);gl.uniform3fv(U3.hor,SKY);
+      gl.uniform1f(U3.hz,w>0?cy/w:-1);gl.uniform3fv(U3.top,SKY_TOP);gl.uniform3fv(U3.hor,SKY);gl.uniform1f(U3.yaw,((Math.atan2(camF[1],camF[0])%6.2832)+6.2832)%6.2832);gl.uniform1f(U3.ck,Math.min(1,cloudK+rainK*.6));gl.uniform1f(U3.t,frame*.0004);gl.uniform1f(U3.asp,VW/VH);gl.uniform3fv(U3.cc,mixc([1,1,1],[.55,.58,.62],rainK).map(v=>v*Math.max(.18,dk)));
       gl.bindBuffer(gl.ARRAY_BUFFER,skyBuf);gl.vertexAttribPointer(A3.p,2,gl.FLOAT,false,8,0);gl.drawArrays(gl.TRIANGLES,0,3);
       gl.depthMask(true);gl.enable(gl.DEPTH_TEST)}
     gl.useProgram(P2);useAttrs([A2.p,A2.uv]);
-    gl.uniformMatrix4fv(U2.vp,false,VP);gl.uniform3fv(U2.cam,eye);gl.uniform3fv(U2.fogC,SKY);gl.uniform1f(U2.fogN,fogN);gl.uniform1f(U2.fogF,fogF);gl.uniform1f(U2.t,frame*.03);gl.uniform1f(U2.day,dk);
+    gl.uniformMatrix4fv(U2.vp,false,VP);gl.uniform3fv(U2.cam,eye);gl.uniform3fv(U2.fogC,SKY);gl.uniform1f(U2.fogN,fogN);gl.uniform1f(U2.fogF,fogF);gl.uniform1f(U2.t,frame*.03);gl.uniform1f(U2.day,dk);gl.uniform1f(U2.wet,rainK);
     gl.activeTexture(gl.TEXTURE0);gl.bindTexture(gl.TEXTURE_2D,groundTex);gl.uniform1i(U2.tex,0);
     gl.bindBuffer(gl.ARRAY_BUFFER,groundBuf);
     gl.vertexAttribPointer(A2.p,3,gl.FLOAT,false,20,0);gl.vertexAttribPointer(A2.uv,2,gl.FLOAT,false,20,12);
@@ -1507,8 +1794,15 @@ function render3D(){
   const P=pp(),M=camMode?80:30,night=dk<.45;
   if(ins){
     drawS(INTBUF[ins.R.k]);
-    for(const n of ins.R.npcs)personGeo(n.x,n.y,n.dance?n.a+Math.sin(frame*.03+n.x)*.6:Math.atan2(player.y-n.y,player.x-n.x)*.3+n.a*.7,n.look,{ph:0,amp:0,dance:n.dance});
-    trn.cyl(ins.R.spot.x,0,ins.R.spot.y,10,10,1.5,14,hex('#ffd34d'),2);
+    const R=ins.R;
+    for(const c of R.cust){const t=frame*c.sp+c.off,u=(Math.sin(t)+1)/2,ct=Math.cos(t);personGeo(c.x0+(c.x1-c.x0)*u,c.z,ct>0?0:Math.PI,c.look,{ph:frame*.12+c.off,amp:Math.abs(ct)>.15?.85:0})}
+    for(const p of peds)if(p.x>IX0-200&&Math.abs(p.x-player.x)<300){const an=pedAnim(p);if(p.gun){an.wpn='pistol';an.aim=true}personGeo(p.x,p.y,p.a,p.look,an)}
+    if(R.vault){trn.cyl(R.vault.x,0,R.vault.y,16,16,heist&&!heist.done?6+Math.sin(frame*.2)*3:1.5,16,hex(heist&&!heist.done?'#ff4757':'#ffd34d'),2)}
+    if(R.k==='jail'){const g=guardPos(R);personGeo(g.x,g.y,g.a,JAILGUARD,{ph:frame*.12,amp:g.moving?.85:0,wpn:'bat'});
+      if(R.vent)trn.cyl(R.vent.x,0,R.vent.y,13,13,1.5,14,hex(player.jail&&player.jail.seen?'#ff4757':'#7bed9f'),2)}
+    for(const k of pickups)if(Math.abs(k.x-P.x)<300&&Math.abs(k.y-P.y)<300)dyn.box(k.x,3+Math.sin(frame*.1)*1.2,k.y,3.4,2,1.6,frame*.05,k.w?C.gun:C.cash,2);
+    for(const n of ins.R.npcs)if(!(n.guard&&heist))personGeo(n.x,n.y,n.dance?n.a+Math.sin(frame*.03+n.x)*.6:Math.atan2(player.y-n.y,player.x-n.x)*.3+n.a*.7,n.look,{ph:0,amp:0,dance:n.dance});
+    if(R.k!=='jail'||player.jail)trn.cyl(ins.R.spot.x,0,ins.R.spot.y,10,10,1.5,14,hex('#ffd34d'),2);
   }else{
     drawS(alwaysS);
     const CR=G*.75+(camMode?80:20);
@@ -1516,7 +1810,7 @@ function render3D(){
     for(const c of cars){const dx=c.x-P.x,dy=c.y-P.y,d2=dx*dx+dy*dy;if(d2>1500*1500||!inView(c.x,c.y,c.w*.6+M+(night?60:0)))continue;carGeo(c,d2>650*650,night)}
     for(const p of peds){const dx=p.x-P.x,dy=p.y-P.y,d2=dx*dx+dy*dy;if(d2>1000*1000||!inView(p.x,p.y,12+M))continue;
       const an=pedAnim(p);an.lod=d2>230*230;personGeo(p.x,p.y,p.a,p.look,an)}
-    for(const k of pickups)if(Math.abs(k.x-P.x)<700&&Math.abs(k.y-P.y)<700){dyn.box(k.x,3+Math.sin(frame*.1+k.x)*1.2,k.y,3.4,2,1.6,frame*.05+k.x,C.cash,2);trn.flat(k.x,.3,k.y,3,3,0,C.shadow)}
+    for(const k of pickups)if(Math.abs(k.x-P.x)<700&&Math.abs(k.y-P.y)<700){dyn.box(k.x,3+Math.sin(frame*.1+k.x)*1.2,k.y,3.4,2,1.6,frame*.05+k.x,k.w?C.gun:C.cash,2);trn.flat(k.x,.3,k.y,3,3,0,C.shadow)}
     // 신호등 불빛
     for(const s of SIGHEADS){if(Math.abs(s.x-P.x)>650||Math.abs(s.z-P.y)>650||!inView(s.x,s.z,10))continue;const L=light(s.c,s.r,s.axis),i=L==='g'?0:L==='y'?1:2;
       dyn.box(s.x,20.8+i*2.6,s.z,.75,.75,2,0,L==='g'?C.lg:L==='y'?C.ly:C.lr,2)}
@@ -1529,6 +1823,10 @@ function render3D(){
       if(m.type==='race'){for(let i=m.ci;i<Math.min(m.cps.length,m.ci+2);i++){const q=m.cps[i];trn.cyl(q.x,0,q.y,26,26,i===m.ci?60:30,16,hex(i===m.ci?'#00d2d3':'#6ab'),2)}}
       else if(T&&m.type!=='collect')beam(T.x,T.y,m.type==='thug'||m.type==='chase'||m.type==='steal'?9:24,m.type==='thug'?60:320,hex(m.t.c))}
     if(player.house&&HOME_DOOR&&!m)beam(HOME_DOOR.ox,HOME_DOOR.oy,5,40,hex('#55efc4'));
+    if(!m&&player.nav)beam(player.nav.x,player.nav.y,10,200,hex('#7bed9f'));
+    for(const p of peds)if((p.quest||p.dealer)&&Math.abs(p.x-P.x)<700&&Math.abs(p.y-P.y)<700){const y=24+Math.sin(frame*.1)*1.2;dyn.box(p.x,y+2.4,p.y,.9,.9,4,0,p.dealer?C.taser:C.ly,2);dyn.box(p.x,y,p.y,.9,.9,1.4,0,p.dealer?C.taser:C.ly,2)}
+    for(const b of boats){if(Math.abs(b.x-P.x)>1500)continue;const a=b.v>0?0:Math.PI;dyn.box(b.x,0,b.z,14,5,4,a,hex(b.col),3);dyn.box(b.x-Math.cos(a)*3,4,b.z,6,4,4,a,C.white);dyn.box(b.x-Math.cos(a)*3,6,b.z,6.2,4.2,1.2,a,C.glass,3);trn.flat(b.x-Math.cos(a)*22,.3,b.z,10,4,a,C.white,2)}
+    if(rainK>.05){const n=Math.round((isTouch?70:140)*rainK);for(let i=0;i<n;i++){const x=eye[0]+camF[0]*90+rnd(-140,140),z=eye[2]+camF[1]*90+rnd(-140,140),y=rnd(0,90);trn.limb(x,y,z,x+.6,y-9,z,.12,.12,1,0,[.75,.8,.9],false,2)}}
   }
   // 플레이어
   if(!player.car){const W=player.cur;personGeo(player.x,player.y,player.a,player.look,{ph:player.walk,amp:player.spd<.05?0:player.spd<3?1:1.5,atk:WEAP[W].melee?player.atk:0,side:player.side,
@@ -1557,8 +1855,24 @@ function render3D(){
 // =====================================================================
 const panel=document.getElementById('panel');let panelState=null,curItems=[];
 function esc(s){return String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
-function openShop(d){const R=d.R;if(R.k==='bank')panelState={type:'bank',door:d,tab:d.role==='증권사'?'stock':'bank'};else panelState={type:'shop',door:d};menuOpen=true;renderPanel()}
-function openPhone(tab='status'){panelState={type:'phone',tab};menuOpen=true;renderPanel()}
+function openShop(d){const R=d.R;if(R.k==='bank'||d.role==='ATM')panelState={type:'bank',door:d,tab:d.role==='증권사'?'stock':'bank',atm:d.role==='ATM'};else panelState={type:'shop',door:d};menuOpen=true;mouseAtk=false;exitLock();renderPanel()}
+function openPhone(tab='status'){panelState={type:'phone',tab};menuOpen=true;mouseAtk=false;exitLock();renderPanel()}
+function openPed(p){const behind=Math.abs(angDiff(Math.atan2(player.y-p.y,player.x-p.x),p.a))>1.9;if(!p.quest&&!p.dealer)p.idle=Math.max(p.idle,600);p.spd=0;
+  if(!behind||p.quest||p.dealer)p.a=Math.atan2(player.y-p.y,player.x-p.x);panelState={type:'ped',p,behind,say:p.dealer?'…뭘 찾지? 경찰한테는 비밀이야.':p.quest?p.quest.t:pedGreet(p)};menuOpen=true;mouseAtk=false;exitLock();renderPanel()}
+const fmtMin=m=>`${Math.floor(m/60)}시간 ${Math.round(m%60)}분`;
+const TIPS=['밤 8시가 넘으면 홍대 클럽 근처에 수상한 무기상이 나타난대요.','학원에서 운전 학원을 다니면 운전이 훨씬 쉬워진대요.','정비소에서 도색하면 경찰이 못 알아본대요.','부동산에서 가게를 사면 매일 돈이 들어온대요.',
+  '버스 타면 순식간에 다른 동네로 갈 수 있어요.','강남은 비싸니까 노량진에서 사 먹어요.','은행 금고는 오른쪽 벽에 있대요… 물론 농담이죠?','편의점 복권 1등이 50만 원이래요!','증권사 뉴스 보고 주식 사면 대박 날 수도?'];
+function pedGreet(p){const h=hourOf();if(wanted>=2)return pick(['히익… 저, 저는 아무것도 못 봤어요!','사, 살려주세요…']);if(rainK>.4)return pick(['비가 엄청 오네요.','우산 안 가져오셨어요?']);
+  return pick(h<11?['좋은 아침이에요!','출근길이라 바빠요~']:h>21?['밤늦게 뭐 하세요?','이 시간엔 조심하세요.']:['안녕하세요!','무슨 일이세요?','네? 저요?','날씨 좋네요.'])}
+function pedLine(p){return pick(TALK.concat(['저 '+districtRaw(p.x,p.y)+' 토박이예요.','요즘 물가가 너무 올랐어요.','어제 '+pick(econ.stocks).n+' 주식 샀어요!','한강에서 치맥 하면 최고죠.']))}
+function stealChance(p,behind){return clamp(.35+.1*player.sk.stealth+(behind?.25:0)-(wanted?.1:0),.05,.95)}
+function pickpocket(p,ch){closePanel();p.idle=0;
+  if(Math.random()<ch){const loot=Math.round(rnd(500,4000)*(1+.2*player.sk.stealth)/100)*100;player.money+=loot;p.robbed=1;player.stats.steals++;gainXP(12,'소매치기');noise(.05,4000,'highpass',.05);return `🤏 지갑 슬쩍! +${won(loot)}`}
+  pop(p.x,p.y,'도둑이야!!','#ff6b6b');if(Math.random()<.5)p.angry=900;else{p.flee=300;p.a=Math.atan2(p.y-player.y,p.x-player.x)}
+  crime(cars.some(c=>c.police&&c.driver&&dist(c,player)<500)?1:.6);for(const q of peds)if(q!==p&&q.down<=0&&!q.angry&&dist(q,p)<150){q.flee=200;q.a=Math.atan2(q.y-p.y,q.x-p.x)}return '😱 들켰다!'}
+function threaten(p){closePanel();p.idle=0;const ok=Math.random()<.7+.05*player.sk.talk+(WEAP[player.cur].melee?0:.12);crime(1);
+  if(ok){const loot=Math.round(rnd(2000,8000)*(1+.2*player.sk.stealth)/100)*100;player.money+=loot;p.robbed=1;p.flee=400;p.a=Math.atan2(p.y-player.y,p.x-player.x);gainXP(15,'협박');pop(p.x,p.y,'가져가세요!','#ff9f43');return `💰 겁먹고 지갑을 줬다 +${won(loot)}`}
+  p.angry=900;pop(p.x,p.y,'어디서 협박이야!','#ff6b6b');return '😠 덤벼든다!'}
 function closePanel(){panel.classList.remove('show');menuOpen=false;panelState=null}
 function btn(it,cls=''){const idx=curItems.push(it)-1,can=!it.dis&&player.money>=(it.p||0);
   return `<button class="it ${cls}" data-i="${idx}" ${can?'':'disabled'}><span class="ic">${it.i}</span><span class="nm">${esc(it.n)}<span class="ds">${esc(it.d||'')}</span></span><span class="pr">${it.p?won(it.p):(it.pl||'')}</span></button>`}
@@ -1578,8 +1892,10 @@ function renderPanel(){
   if(s.type==='shop'){const M=shopMenu(s.door);h+=`<h2>${esc(M.title)}</h2><div class="sub">${esc(M.sub)} · 지갑 ${won(player.money)}</div>`;
     if(s.door.R.k==='food'||s.door.R.k==='store'||s.door.R.k==='cafe')h+=`<div class="sub">🍔 배고픔 ${Math.round(player.hunger)}/100 · ❤️ ${Math.round(player.hp)}/${player.maxHp}</div>`;
     for(const it of M.items)h+=btn(it);if(!M.items.length)h+='<div class="sub">이용할 수 있는 것이 없어요</div>'}
-  if(s.type==='bank'){h+=`<h2>${s.door.R.i} ${esc(s.door.role)}</h2>`+tabs([['bank','🏦 은행'],['stock','📈 주식']],s.tab);
-    if(s.tab==='bank'){const maxLoan=Math.round(100000*econ.infl/1000)*1000,q=Math.round(10000*econ.infl/1000)*1000;
+  if(s.type==='bank'){h+=`<h2>${s.door.R.i} ${esc(s.door.role)}</h2>`+(s.atm?'':tabs([['bank','🏦 은행'],['stock','📈 주식']],s.tab));
+    if(s.door.role==='은행'&&!s.atm&&s.tab==='bank'){const okW=player.weapons.pistol||player.weapons.shotgun,done=s.door.robDay===econ.day;
+      h+=btn({i:'💣',n:'은행 털기',d:player.lv<4?'🔒 Lv.4 필요':!okW?'권총이나 산탄총이 필요해요 (총포사 · 밤의 암시장)':done?'오늘은 경비가 삼엄해요':'금고 앞에서 10초 버티면 대박 · 수배 ★★★★',p:0,dis:player.lv<4||!okW||done||!!heist,act(){startHeist(s.door);return null}})}
+    if(s.tab==='bank'){const maxLoan=Math.round(100000*econ.infl/1000)*1000*(player.lv>=6?2:1),q=Math.round(10000*econ.infl/1000)*1000;
       h+=row('👛 지갑',won(player.money))+row('🏦 예금 (하루 0.6% 이자)',won(player.bank))+row('💳 대출 (하루 1.5% 이자)',won(player.loan),player.loan?'up':'')+row('🏷️ 내 가게',player.biz.length+'곳 · 하루 '+won(player.biz.reduce((a,id)=>a+bizIncome(doors[id]),0)));
       h+=`<div class="sub">은행 돈은 쓰러지거나 체포돼도 안전해요.</div>`;
       h+=btn({i:'⬇️',n:`입금 ${won(q)}`,p:q,act(){player.bank+=q;return '입금 완료'}});
@@ -1590,8 +1906,40 @@ function renderPanel(){
       h+=btn({i:'✅',n:'대출 상환',d:won(Math.min(player.loan,player.money+player.bank)),p:0,dis:!player.loan||player.money+player.bank<=0,act(){let r=Math.min(player.loan,player.money);player.money-=r;player.loan-=r;
         const r2=Math.min(player.loan,player.bank);player.bank-=r2;player.loan-=r2;return '상환 완료'}})}
     else h+=stockHTML(.001)}
-  if(s.type==='phone'){h+=`<h2>📱 휴대폰</h2>`+tabs([['status','내 정보'],['mission','미션'],['stock','주식'],['help','도움말']],s.tab);
+  if(s.type==='ped'){const p=s.p;h+=`<h2>${p.dealer?'🕶️ 수상한 남자':(p.look.f?'👩 ':'👨 ')+esc(pedName(p))}</h2>`;
+    if(s.say)h+=`<div class="sub" style="color:#fff;background:rgba(255,255,255,.08);padding:9px 11px;border-radius:10px">"${esc(s.say)}"</div>`;
+    if(p.dealer)h+=btn({i:'🕶️',n:'물건 보기',d:'레벨 제한 없는 무기 · 비싸요',p:0,act(){openShop(BM_DOOR);return null}});
+    else{if(p.quest)h+=btn({i:'❗',n:'부탁 들어보기',d:mission?'진행 중인 미션이 있어요':`${MT[p.quest.type].i} ${MT[p.quest.type].n} · 보상 높음`,p:0,dis:!!mission,act(){openBrief(p.quest.type,{giver:p,text:p.quest.t});return null}});
+      h+=btn({i:'💬',n:'대화하기',p:0,act(){s.say=pedLine(p);if(!p.talked){p.talked=1;gainXP(2)}return null}});
+      h+=btn({i:'🗺️',n:'길 묻기',d:'가까운 곳을 지도에 표시해 줘요',p:0,act(){s.ask=!s.ask;return null}});
+      if(s.ask)for(const [ic,n,f] of [['🍔','식당',q=>q.R.k==='food'],['🏪','편의점',q=>q.role==='편의점'],['🏥','병원',q=>q.role==='병원'],['🔫','총포사',q=>q.role==='총포사'],['🏦','은행',q=>q.role==='은행'],['🔧','정비소',q=>q.R.drive],['🚏','버스정류장',q=>q.role==='버스정류장'],['🏧','ATM',q=>q.role==='ATM']]){
+        h+=btn({i:ic,n:`${n} 어디예요?`,p:0,act(){let b=null,bd=1e9;for(const q of doors)if(f(q)){const d=Math.hypot(q.ox-player.x,q.oy-player.y);if(d<bd){bd=d;b=q}}
+          if(b){player.nav={x:b.ox,y:b.oy};s.say=`${b.role}요? ${districtRaw(b.x,b.y)} 쪽으로 ${(bd*2.5/1000).toFixed(1)}km 가시면 있어요.`;s.ask=0;return '📍 지도에 표시했어요 (초록 기둥)'}return null}})}
+      h+=btn({i:'💸',n:'용돈 주기',d:'기분이 좋아지면 꿀팁을 알려줘요',p:priceOf(1000,doors[0]),act(){gainXP(3);s.say=pick(TIPS);return null}});
+      const ch=stealChance(p,s.behind);
+      h+=btn({i:'🤏',n:'지갑 훔치기',d:p.robbed?'이미 털었어요':`성공 ${Math.round(ch*100)}%${s.behind?' (등 뒤라서 유리!)':' · 등 뒤에서 말 걸면 더 쉬워요'} · 들키면 수배`,p:0,dis:!!p.robbed,act(){return pickpocket(p,ch)}});
+      h+=btn({i:'🔫',n:'협박하기',d:player.lv<2?'🔒 Lv.2 필요':player.cur==='fist'?'무기를 들고 있어야 해요 (Q)':'돈을 뜯어요 · 수배 ★',p:0,dis:player.lv<2||player.cur==='fist'||!!p.robbed,act(){return threaten(p)}})}}
+  if(s.type==='brief'){const T=MT[s.mt],g=s.src.giver;h+=`<h2>${T.i} ${T.n}</h2>`;
+    if(g)h+=`<div class="sub" style="color:#fff;background:rgba(255,255,255,.08);padding:9px 11px;border-radius:10px">${g.look.f?'👩':'👨'} ${esc(pedName(g))}: "${esc(s.src.text)}"</div>`;
+    h+=`<div class="sub">${esc(T.d)}</div><div class="sub"><b style="color:#fff">목표</b><br>${T.steps.map((t,i)=>`${i+1}. ${esc(t)}`).join('<br>')}</div>`;
+    const est=Math.round(({delivery:4000,taxi:4500,thug:8000,steal:12000,race:11000,collect:7000,escape:9000,chase:13000,find:6000,ride:5000}[s.mt])*(g?(g.quest?g.quest.mult:1.3):1)*rewardMult()/100)*100;
+    h+=row('💰 기본 보상',won(est)+' + 등급 보너스')+row('⭐ 경험치',`약 ${Math.round((50+est/120)*(g?1.3:1))} XP`)+(T.car?row('🚗 필요','차량'):'')+row('🏅 등급','S 1.5배 · A 1.25배 · B 1.1배');
+    h+=btn({i:'✅',n:'수락하기',p:0,act(){acceptBrief();return null}})+btn({i:'✖️',n:'나중에',p:0,act(){closePanel();return null}})}
+  if(s.type==='jail'){const J=player.jail;if(J){const bail=priceOf(4000+J.left*120,doors[0]);
+    h+=`<h2>🔒 서울 구치소</h2><div class="sub">남은 형기 <b style="color:#fff">${fmtMin(J.left)}</b> · 들킨 횟수 ${J.caught}회</div>`;
+    h+=btn({i:'⏳',n:'형기 채우기',d:`시간이 ${fmtMin(J.left)} 흘러요 · 배고픔 감소`,p:0,act(){const m=J.left;closePanel();timeTick(m);player.hunger=Math.max(5,player.hunger-m/12);releaseJail('🔓 출소! 착하게 살아요');return null}});
+    h+=btn({i:'💰',n:'보석금 내기',d:'바로 풀려나요',p:bail,act(){closePanel();releaseJail('💰 보석으로 석방!');return null}});
+    h+=btn({i:'⚖️',n:'변호사 선임',d:J.lawyer?'이미 선임했어요':'형기 절반으로 감형',p:Math.round(bail*.4/100)*100,dis:!!J.lawyer,act(){J.left=Math.round(J.left/2);J.lawyer=1;return '⚖️ 형기 절반 감형!'}});
+    h+=btn({i:'🍚',n:'콩밥 먹기',d:'배고픔 +35 (무료 · 한 번)',p:0,dis:!!J.ate,act(){player.hunger=Math.min(100,player.hunger+35);J.ate=1;return '🍚 꿀맛'}});
+    h+=`<div class="sub">🔧 <b style="color:#fff">탈옥</b>: 감방 뒤쪽 환풍구(초록 원) 위에 서 있으면 뜯어요. 간수가 이쪽을 보면 원이 빨개져요 — 그때 환풍구에 있으면 들켜서 형기 +30분!</div>`}}
+  if(s.type==='phone'){h+=`<h2>📱 휴대폰</h2>`+tabs([['status','내 정보'],['skill','스킬'],['mission','미션'],['stock','주식'],['set','설정'],['help','도움말']],s.tab);
+    if(s.tab==='skill'){h+=row('⭐ 레벨',`Lv.${player.lv}`)+row('✨ 경험치',`${player.xp} / ${xpNeed(player.lv)}`)+row('🎯 스킬 포인트',player.sp,player.sp?'up':'');
+      for(const [id,ic,n,ds] of SKILLS)h+=btn({i:ic,n:`${n} ${'●'.repeat(player.sk[id])}${'○'.repeat(5-player.sk[id])}`,d:ds,p:0,pl:player.sk[id]>=5?'MAX':'+1',dis:player.sp<=0||player.sk[id]>=5,act(){player.sk[id]++;player.sp--;return `${ic} ${n} 상승!`}});
+      h+=`<div class="sub" style="margin-top:8px"><b style="color:#fff">레벨 해금</b><br>${Object.entries(UNLOCK).map(([l,t])=>`${player.lv>=+l?'✅':'🔒'} Lv.${l} ${t}`).join('<br>')}<br><br>경험치: 미션 · 강도 · 소매치기 · 레이스 · 공부 · 노래방 · 싸움</div>`}
+    if(s.tab==='set'){const opt=(label,key,vals)=>`<div class="row"><span>${label}</span></div><div style="display:flex;gap:6px">`+vals.map(([v,n])=>`<button class="it sm" data-set="${key}" data-v="${v}" style="${settings[key]==v?'background:#ffd34d;color:#222':''}"><span class="nm">${n}</span></button>`).join('')+`</div>`;
+      h+=opt('🚗 조향 감도 (핸들 반응)','steer',[[.7,'낮음'],[1,'보통'],[1.35,'높음']])+opt('⚡ 차 최고 속도','speed',[[.6,'60%'],[.75,'75%'],[.85,'85%'],[1,'100%']])+opt('🖱️ 시점 회전 감도','cam',[[.6,'낮음'],[1,'보통'],[1.6,'높음']])+opt('🛣️ 직진 보조 (도로 방향 자동 정렬)','assist',[['1','켜기'],['0','끄기']])}
     if(s.tab==='status'){const W=WORDER.filter(w=>player.weapons[w]).map(w=>WEAP[w].i+(WEAP[w].melee?'':player.ammo[w])).join(' ');
+      h+=row('⭐ 레벨',`Lv.${player.lv} (${player.xp}/${xpNeed(player.lv)} XP)${player.sp?' · 스킬 포인트 '+player.sp:''}`)+row('🤏 소매치기 / 강도',`${player.stats.steals||0}회 / ${player.stats.robs||0}회`);
       h+=row('📅 날짜',`${econ.day}일차 ${String(Math.floor(hourOf())).padStart(2,'0')}:${String(Math.floor(econ.min%60)).padStart(2,'0')}`)+row('👛 지갑',won(player.money))+row('🏦 예금',won(player.bank))+(player.loan?row('💳 대출',won(player.loan),'up'):'')+
         row('📈 주식 평가액',won(portfolioValue()))+row('💰 총 자산',won(player.money+player.bank+portfolioValue()-player.loan+player.biz.reduce((a,id)=>a+bizValue(doors[id]),0)+(player.house?40000*econ.infl:0)))+
         row('❤️ 체력',`${Math.round(player.hp)}/${player.maxHp}`)+row('🍔 배고픔',Math.round(player.hunger)+'/100')+row('🦺 방탄',Math.round(player.armor))+row('💪 힘',`x${player.str.toFixed(2)}`)+
@@ -1606,7 +1954,7 @@ function renderPanel(){
         for(const o of offers)h+=row(`${MT[o.type].i} ${MT[o.type].n}${MT[o.type].car?' 🚗':''}`,`${(dist(o.pos,P)*2.5/1000).toFixed(1)}km · ${districtRaw(o.pos.x,o.pos.y)}`)}
       h+=btn({i:'🔄',n:'다른 미션 찾기',d:'의뢰 목록 새로고침',p:priceOf(500,doors[0]),dis:!!mission,act(){refreshOffers(true);return '새 의뢰 도착'}})}
     if(s.tab==='stock')h+=stockHTML(.005);
-    if(s.tab==='help')h+=`<div class="sub" style="color:#dde">
+    if(s.tab==='help')h+=`<div class="sub" style="color:#dde"><b>시점</b> PC: 화면 클릭 → 마우스로 회전 (Esc 해제) · 폰: 빈 화면을 손가락으로 밀기<br><b>사람</b> 가까이 가서 💬: 대화·길 묻기·소매치기·협박 · ❗ 표시 사람은 부탁(미션)<br><b>범죄</b> 무기 들고 가게 카운터 → 가게 털기 · 은행(Lv.4) → 금고 털기 · 체포되면 감옥(보석·형기·탈옥)<br><b>총</b> 총포사(Lv.3~) 또는 밤 8시~새벽 5시 홍대 클럽 근처 🕶️ 암시장<br>
       <b>이동</b> WASD/조이스틱 · Shift/🏃 달리기<br><b>행동</b> F/🚗 버튼: 차 타기 · 가게 들어가기 · 카운터에서 주문 · 정비소 이용<br>
       <b>전투</b> J/클릭/👊 공격 · Q/🔄 무기 교체 · 총은 가까운 대상을 자동 조준<br><b>생존</b> 🍔 배고픔이 0이 되면 체력이 줄어요 → 식당·편의점<br>
       <b>돈 벌기</b> 미션 · 주식 · 가게 인수(매일 수익) · 은행 이자<br><b>돈 쓰기</b> 음식 · 무기 · 옷/머리 · 헬스 · 차 · 집 · 튜닝 · 병원<br>
@@ -1616,6 +1964,7 @@ function renderPanel(){
 }
 panel.addEventListener('click',e=>{
   const t=e.target.closest('[data-tab]');if(t){panelState.tab=t.dataset.tab;renderPanel();return}
+  const st=e.target.closest('[data-set]');if(st){const k=st.dataset.set,v=st.dataset.v;settings[k]=k==='assist'?v==='1':+v;save();renderPanel();return}
   if(e.target.id==='closeP'){closePanel();return}
   const b=e.target.closest('[data-i]');if(!b||b.disabled)return;const it=curItems[+b.dataset.i];if(!it)return;
   const p=it.p||0;if(player.money<p){toast('돈이 부족해요','#ff6b6b');return}
@@ -1630,6 +1979,7 @@ document.getElementById('menuBtn').addEventListener('pointerdown',e=>{e.stopProp
 function rr(x,y,w,h,r){ctx.beginPath();if(ctx.roundRect)ctx.roundRect(x,y,w,h,r);else ctx.rect(x,y,w,h)}
 function txt(t,x,y,col='#fff',font='bold 14px sans-serif',align='center',lw=4){ctx.font=font;ctx.textAlign=align;ctx.lineJoin='round';if(lw){ctx.lineWidth=lw;ctx.strokeStyle='rgba(0,0,0,.85)';ctx.strokeText(t,x,y)}ctx.fillStyle=col;ctx.fillText(t,x,y)}
 function bar(x,y,w,v,col,ic){ctx.fillStyle='rgba(0,0,0,.5)';ctx.fillRect(x+16,y,w,8);ctx.fillStyle=col;ctx.fillRect(x+16,y,w*clamp(v,0,1),8);ctx.font='11px sans-serif';ctx.textAlign='left';ctx.fillText(ic,x,y+8)}
+const MAPICON={'총포사':'🔫','병원':'🏥','경찰서':'👮','은행':'🏦','자동차 매장':'🚘','정비소':'🔧','부동산':'🏠','학원':'📚'};
 const MM=.045,mm=document.createElement('canvas');mm.width=WW*MM;mm.height=WH*MM;
 (function(){const m=mm.getContext('2d');m.fillStyle='#8f8a80';m.fillRect(0,0,mm.width,mm.height);
   for(const k in cells){const [c,r]=k.split(',').map(Number);if(cells[k].ground){m.fillStyle=cells[k].ground;m.fillRect(c*G*MM,r*G*MM,G*MM,G*MM)}}
@@ -1640,6 +1990,9 @@ const MM=.045,mm=document.createElement('canvas');mm.width=WW*MM;mm.height=WH*MM
   m.fillStyle='rgba(60,60,70,.55)';for(const b of allB)m.fillRect(b.x*MM,b.y*MM,b.w*MM,b.h*MM);
   for(const d of doors){m.fillStyle=d.R.col;m.fillRect(d.x*MM-1.5,d.y*MM-1.5,3,3)}
 })();
+// 주요 시설 아이콘은 고해상도 미니맵에 한 번만 그려 둠
+const mmI=document.createElement('canvas');mmI.width=mm.width*2;mmI.height=mm.height*2;
+(function(){const m=mmI.getContext('2d');m.drawImage(mm,0,0,mmI.width,mmI.height);m.font='15px sans-serif';m.textAlign='center';for(const d of doors)if(MAPICON[d.role])m.fillText(MAPICON[d.role],d.x*MM*2,d.y*MM*2+6)})();
 function drawHUD(){
   ctx.setTransform(DPR,0,0,DPR,0,0);ctx.clearRect(0,0,VW,VH);
   const P=pp(),A=anchor(),mob=isTouch||VW<760,S=mob?.82:1,F=n=>`bold ${Math.round(n*S)}px sans-serif`,ins=player.inside;
@@ -1647,7 +2000,12 @@ function drawHUD(){
   if(!ins)for(const l of labels){const lim=l.big?2200:l.near?240:900;if(Math.abs(l.x-P.x)>lim||Math.abs(l.z-P.y)>lim)continue;const d=Math.hypot(l.x-P.x,l.z-P.y);if(d>lim)continue;const p=project(l.x,l.y,l.z);if(p.w<=0)continue;
     if(p.x<-100||p.x>VW+100||p.y<-50||p.y>VH+50)continue;ctx.globalAlpha=clamp(1.4-d/lim,0,1);
     txt(l.t+(l.door&&player.biz.includes(l.door.id)?' (내 가게)':''),p.x,p.y,l.near?'#ffe9a8':'#fff',F(l.big?17:l.near?13:14),'center',4);ctx.globalAlpha=1}
-  if(ins){const R=ins.R,p=project(R.spot.x,18,R.spot.y);if(p.w>0)txt(R.k==='house'?'🛏️ 침대':'🛎️ 카운터',p.x,p.y,'#ffd34d',F(15))}
+  if(ins){const R=ins.R,p=project(R.spot.x,18,R.spot.y);if(p.w>0&&(R.k!=='jail'||player.jail))txt(R.k==='house'||R.k==='jail'?'🛏️ 침대':'🛎️ 카운터',p.x,p.y,'#ffd34d',F(15));
+    if(R.vault){const q=project(R.vault.x,22,R.vault.y);if(q.w>0)txt(heist&&!heist.done?'💰 금고 (여기서 버텨라!)':'🔒 금고',q.x,q.y,heist?'#ff6b6b':'#ccc',F(14))}
+    if(R.vent&&player.jail){const q=project(R.vent.x,16,R.vent.y);if(q.w>0)txt(player.jail.seen?'👀 간수가 보고 있다!':'🔧 환풍구',q.x,q.y,player.jail.seen?'#ff6b6b':'#7bed9f',F(14))}}
+  // 사람 머리 위 표시 (❗ 부탁 · 🕶️ 암시장)
+  if(!ins)for(const p of peds){if(!(p.quest||p.dealer)||Math.abs(p.x-P.x)>500||Math.abs(p.y-P.y)>500)continue;const q=project(p.x,34,p.y);if(q.w<=0||q.x<0||q.x>VW||q.y<0||q.y>VH)continue;
+    txt(p.dealer?'🕶️ 암시장':'❗ 부탁',q.x,q.y,p.dealer?'#f5d90a':'#ffd34d',F(14),'center',4)}
   // 미션 아이콘
   const T=missionTarget();let onScr=false,tp=null;
   if(!ins){
@@ -1664,9 +2022,10 @@ function drawHUD(){
   // 좌상단: 위치 · 시간 · 게이지
   const top=mob?22:30,hh=Math.floor(hourOf()),mn=Math.floor(econ.min%60),night=dayK()<.4;
   txt('📍 '+districtAt(A.x,A.y),14,top,'#fff',F(19),'left',5);
-  txt(`${night?'🌙':'☀️'} ${String(hh).padStart(2,'0')}:${String(mn).padStart(2,'0')} · ${econ.day}일차`,14,top+20*S,'#dfe6ee',F(13),'left',4);
+  txt(`${econ.weather==='rain'?'🌧️':econ.weather==='cloudy'?'☁️':night?'🌙':'☀️'} ${String(hh).padStart(2,'0')}:${String(mn).padStart(2,'0')} · ${econ.day}일차`,14,top+20*S,'#dfe6ee',F(13),'left',4);
   let by=top+30*S;
   if(player.car){txt(Math.round(Math.abs(player.car.v)*18)+' km/h',14,by+12*S,'#fff',F(17),'left');by+=20*S;bar(14,by,104,player.car.hp/100,player.car.hp>50?'#4cd964':player.car.hp>0?'#ffb020':'#ff3b30','🚗');by+=12}
+  bar(14,by,104,player.xp/xpNeed(player.lv),'#a29bfe','⭐');txt('Lv.'+player.lv,124,by+8,'#d6c8ff',F(11),'left',3);by+=12;
   bar(14,by,104,player.hp/player.maxHp,'#ff5e5e','❤️');by+=12;
   if(player.armor>0){bar(14,by,104,player.armor/100,'#4da3ff','🦺');by+=12}
   const hf=player.hunger<20&&frame%40<20;bar(14,by,104,player.hunger/100,hf?'#fff':'#ffa94d','🍔');by+=12;
@@ -1676,7 +2035,9 @@ function drawHUD(){
   txt('🏦 '+won(player.bank),VW-14,top+24*S,'#c8f7c5',F(12),'right',3);
   for(let i=0;i<5;i++){const on=i<wanted,fl=on&&calm>0&&frame%30<15;txt('★',VW-18-(4-i)*25*S,top+48*S,on?(fl?'#fff':'#ffd34d'):'rgba(255,255,255,.3)',F(24),'right',3)}
   // 미션 배너
-  let mt;if(mission){mt=mission.txt();if(mission.time>0)mt+=` ⏱${Math.ceil(mission.time/60)}초`;mt+=' · '+won(mission.reward)}
+  let mt;if(player.jail){mt=`🔒 수감 중 · 남은 형기 ${fmtMin(player.jail.left)} · 침대에서 메뉴`}
+  else if(heist&&!heist.done){mt=`🚨 은행 털기 · 금고 ${Math.round(heist.prog/heist.need*100)}%`}
+  else if(mission){mt=mission.txt();if(mission.time>0)mt+=` ⏱${Math.ceil(mission.time/60)}초`;mt+=' · '+won(mission.reward)}
   else mt=ins?`${ins.door.R.i} ${ins.door.role} — 노란 원(카운터)에서 ${isTouch?'버튼':'F'}`:'🗺️ 색깔 기둥으로 가면 미션 시작 (📱 미션 탭)';
   ctx.font=F(15);const mw=Math.min(VW-20-(mob?250:0),ctx.measureText(mt).width+26),my=mob?6:12;
   ctx.fillStyle='rgba(0,0,0,.55)';rr(VW/2-mw/2,my,mw,30*S+2,15);ctx.fill();
@@ -1691,16 +2052,30 @@ function drawHUD(){
   if(!player.car&&player.comboT>0&&player.combo>1)txt(player.combo+' 콤보!',VW/2,VH*.64,'#ffd34d',F(20));
   // 미니맵
   if(!ins){const ms=mob?.55:1,mw2=mm.width*ms,mh2=mm.height*ms,mx=VW-mw2-12,mY=mob?top+58*S:VH-mh2-12,q=MM*ms;
-    ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(mx-3,mY-3,mw2+6,mh2+6);ctx.drawImage(mm,mx,mY,mw2,mh2);
+    ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(mx-3,mY-3,mw2+6,mh2+6);ctx.drawImage(mmI,mx,mY,mw2,mh2);
     for(const c of cars){if(c.police&&c.driver&&c.hp>0){ctx.fillStyle=frame%20<10?'#f33':'#36f';ctx.fillRect(mx+c.x*q-2,mY+c.y*q-2,4,4)}else if(c.owned){ctx.fillStyle='#55efc4';ctx.fillRect(mx+c.x*q-2.5,mY+c.y*q-2.5,5,5)}}
     if(player.house&&HOME_DOOR){ctx.fillStyle='#55efc4';ctx.beginPath();ctx.arc(mx+HOME_DOOR.x*q,mY+HOME_DOOR.y*q,3.5,0,7);ctx.fill()}
     if(!mission)for(const o of offers){ctx.fillStyle=MT[o.type].c;ctx.beginPath();ctx.arc(mx+o.pos.x*q,mY+o.pos.y*q,3.5,0,7);ctx.fill()}
     if(T&&mission&&frame%30<20){ctx.fillStyle=mission.t.c;ctx.beginPath();ctx.arc(mx+T.x*q,mY+T.y*q,4.5,0,7);ctx.fill();ctx.strokeStyle='#000';ctx.stroke()}
+    for(const p of peds)if(p.quest||p.dealer){ctx.fillStyle=p.dealer?'#f5d90a':'#ffd34d';ctx.beginPath();ctx.arc(mx+p.x*q,mY+p.y*q,3,0,7);ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=1;ctx.stroke()}
+    if(player.nav){ctx.fillStyle='#7bed9f';ctx.beginPath();ctx.arc(mx+player.nav.x*q,mY+player.nav.y*q,4,0,7);ctx.fill()}
     ctx.save();ctx.translate(mx+P.x*q,mY+P.y*q);ctx.rotate(player.car?player.car.a:player.a);ctx.fillStyle='#fff';ctx.strokeStyle='#000';ctx.lineWidth=1.5;
     ctx.beginPath();ctx.moveTo(6,0);ctx.lineTo(-4,-4);ctx.lineTo(-4,4);ctx.closePath();ctx.fill();ctx.stroke();ctx.restore()}
   // 행동 안내
   if(started&&!overlay&&!menuOpen){const a=ctxAction();if(a&&a.t!=='탑승<br>하차'){txt((isTouch?'':'[F] ')+a.i+' '+a.t.replace('<br>',''),VW/2,VH*.74,'#ffd34d',F(17))}
     else if(!player.car&&!ins){let near=false;for(const c of cars)if(!c.boom&&dist(c,player)<50){near=true;break}if(near)txt(isTouch?'🚗 탑승 버튼을 누르세요':'F 키로 탑승',VW/2,VH*.74,'#ffd34d',F(17))}}
+  // 경험치 팝업 · 레벨업 · 진행바 · 결과 카드
+  {let yy=by+24;for(const f of xpFx){ctx.globalAlpha=Math.min(1,f.life/25);txt(f.t,14,yy,'#c8b6ff',F(13),'left',3);yy+=16}ctx.globalAlpha=1}
+  if(lvFx>0){ctx.globalAlpha=Math.min(1,lvFx/30);txt('LEVEL UP!',VW/2,VH*.36,'#ffd34d',F(46),'center',7);txt(`Lv.${player.lv}`,VW/2,VH*.36+36,'#fff',F(24),'center',5);ctx.globalAlpha=1}
+  const prog=(v,label,col)=>{const w=Math.min(260,VW-80),x=VW/2-w/2,y=mob?VH*.6:VH-110;ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(x,y,w,14);ctx.fillStyle=col;ctx.fillRect(x,y,w*clamp(v,0,1),14);txt(label,VW/2,y-7,'#fff',F(15))};
+  if(heist&&!heist.done&&ins)prog(heist.prog/heist.need,dist(player,ins.R.vault)<17?'💰 금고 여는 중…':'💰 금고(빨간 원)로 가라!','#ffd32a');
+  if(player.jail&&player.jail.vent>0)prog(player.jail.vent/420,'🔧 환풍구 뜯는 중…','#7bed9f');
+  if(mission&&mission.type==='race'&&mission.st==='count'){const n=Math.ceil(mission.cd/60);txt(n>0?String(n):'GO!',VW/2,VH*.4,'#ffd34d',F(80),'center',8)}
+  if(resultCard){const c=resultCard,a=Math.min(1,c.life/30,(330-c.life)/15+.01),w=Math.min(320,VW-40),h=58+c.lines.length*20,x=VW/2-w/2,y=VH*.3;ctx.globalAlpha=a;
+    ctx.fillStyle='rgba(12,14,22,.88)';rr(x,y,w,h,14);ctx.fill();const gc={S:'#ffd32a',A:'#7bed9f',B:'#70a1ff',C:'#ccc'}[c.grade]||'#ffd32a';
+    txt(c.grade,x+34,y+44,gc,F(42),'center',5);txt(c.t,x+66,y+26,'#fff',F(16),'left',0);c.lines.forEach((l,i)=>txt(l,x+66,y+48+i*20,'#cfd6e4',F(13),'left',0));ctx.globalAlpha=1}
+  if(!isTouch&&started&&!menuOpen&&!overlay){if(document.pointerLockElement===glc){if(!player.car){ctx.strokeStyle='rgba(255,255,255,.8)';ctx.lineWidth=1.5;ctx.beginPath();ctx.arc(VW/2,VH*.45,5,0,7);ctx.stroke()}}
+    else txt('🖱️ 화면을 클릭하면 마우스로 시점 회전 (Esc로 해제)',VW/2,VH-66,'rgba(255,255,255,.75)',F(13),'center',3)}
   if(overlay){ctx.fillStyle='rgba(0,0,0,.55)';ctx.fillRect(0,0,VW,VH);txt(overlay.t,VW/2,VH/2,overlay.c,F(56),'center',8);txt(overlay.s,VW/2,VH/2+44,'#fff',F(22))}
   if(!started){ctx.fillStyle='rgba(0,0,0,.6)';ctx.fillRect(0,0,VW,VH);
     txt('서울 스트리트 3D',VW/2,VH/2-58,'#ffd34d',`bold ${Math.min(60,VW/9)|0}px sans-serif`,'center',8);
@@ -1708,6 +2083,20 @@ function drawHUD(){
     txt(loaded?`💾 저장된 게임: ${econ.day}일차 · ${won(player.money)}`:'처음 오셨네요! 배고픔을 채우고 돈을 벌어 보세요',VW/2,VH/2+16,'#c8f7c5',F(15));
     txt(isTouch?'화면을 터치해서 시작 (가로 화면 추천)':'클릭하거나 아무 키나 눌러 시작',VW/2,VH/2+52,frame%60<40?'#fff':'#999',F(17))}
 }
+
+// ---------- 시점 조작: 마우스(포인터 고정) · 터치 드래그 ----------
+let lookId=null,lookX=0,lookY=0;
+glc.addEventListener('pointerdown',e=>{
+  if(e.pointerType==='mouse'){if(!started)start();if(menuOpen)return;
+    if(document.pointerLockElement!==glc){try{const r=glc.requestPointerLock();if(r&&r.catch)r.catch(()=>{})}catch(_){}}
+    else if(e.button===0){mouseAtk=true;attack()}return}
+  if(!started||menuOpen)return;if(lookId===null){lookId=e.pointerId;lookX=e.clientX;lookY=e.clientY}});
+addEventListener('pointermove',e=>{if(e.pointerId!==lookId)return;const dx=e.clientX-lookX,dy=e.clientY-lookY;lookX=e.clientX;lookY=e.clientY;
+  camYaw+=dx*.0065*settings.cam;camPitch=clamp(camPitch+dy*.004*settings.cam,-.35,.9);manualT=frame});
+const lookEnd=e=>{if(e.pointerId===lookId)lookId=null};addEventListener('pointerup',lookEnd);addEventListener('pointercancel',lookEnd);
+addEventListener('mouseup',e=>{if(e.button===0)mouseAtk=false});
+document.addEventListener('mousemove',e=>{if(document.pointerLockElement===glc&&!menuOpen){camYaw+=e.movementX*.0028*settings.cam;camPitch=clamp(camPitch+e.movementY*.0022*settings.cam,-.35,.9);manualT=frame}});
+document.addEventListener('pointerlockchange',()=>{if(document.pointerLockElement!==glc)mouseAtk=false});
 
 // ---------- 터치 컨트롤 ----------
 (function(){
